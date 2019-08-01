@@ -44,6 +44,20 @@ class TestUtil(unittest.TestCase):
                 assert np.allclose(C.convolved[0], xcheck)
                 k += 1
 
+    def test_prepare(self, size=100, nelec=1e6, bias=1e3, bgrms=20., invgain=10, seed=123):
+        gauss = lambda x, y: np.exp(-0.5 * (x ** 2 + y ** 2) / (0.03 * size) ** 2)
+        signal_elec = nelec * make_template(size, gauss, oversampling=2, normalized=True)
+        signal_adu = signal_elec / invgain
+        var_adu = signal_elec / invgain ** 2
+        var_tot = var_adu + bgrms ** 2
+        rng = np.random.RandomState(seed=seed)
+        D = rng.normal(loc=signal_adu + bias, scale=np.sqrt(var_tot))
+        D, W = prepare(D, invgain=invgain)
+        clipped, _, _ = scipy.stats.sigmaclip(D)
+        self.assertTrue(np.abs(np.mean(clipped)) < 1e-4)
+        rho = np.corrcoef(var_tot.reshape(-1), 1 / W.reshape(-1))[0, 1]
+        self.assertTrue(rho > 0.8)
+
 
 if __name__ == '__main__':
     unittest.main()
