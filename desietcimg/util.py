@@ -1,8 +1,7 @@
 """General purpose utilities for imaging analysis.
 """
-
-
 import numpy as np
+import scipy.signal
 
 
 def downsample(data, downsampling, summary=np.sum, allow_trim=False):
@@ -80,3 +79,60 @@ def make_template(size, profile, dx=0, dy=0, oversampling=10, normalized=True):
     if normalized:
         T /= T.sum()
     return T
+
+
+class Convolutions(object):
+    """Convolution of one or more sources with the same kernel.
+    
+    Changes to :attr:`sources` using :meth:`set_source` will automatically
+    update :attr:`convolved` be only recomputing convolutions in the
+    region affected by the change.
+    
+    The convolutions uses the `same` mode.
+    """
+    def __init__(self, sources, kernel):
+        ksize = len(kernel)
+        if kernel.shape != (ksize, ksize) or ksize % 2 != 1:
+            raise ValueError('Kernel must be 2D and square with odd size.')
+        self.kernel = np.asarray(kernel)
+        ny, nx = sources[0].shape
+        for source in sources[1:]:
+            if source.shape != (ny, nx):
+                raise ValueError('All sources must have the same shape.')
+        self.sources = [np.asarray(source) for source in sources]
+        self.convolved = [
+            scipy.signal.convolve(source, kernel, mode='same')
+            for source in sources]
+
+    def set_source(self, yslice, xslice, value):
+        if not isinstance(yslice, slice):
+            yslice = slice(yslice, yslice + 1)
+        if not isinstance(xslice, slice):
+            xslice = slice(xslice, xslice + 1)
+        ny, nx = self.sources[0].shape
+        h = len(self.kernel) // 2
+        # Calculate the region of the convolution affected by this change.
+        xloc = max(0, xslice.start - h)
+        yloc = max(0, yslice.start - h)
+        xhic = min(nx, xslice.stop + h)
+        yhic = min(ny, yslice.stop + h)
+        conv_slice = (slice(yloc, yhic), slice(xloc, xhic))
+        # Calculate the region of the source that that contributes to the change.
+        xlos = max(0, xloc - h)
+        ylos = max(0, yloc - h)
+        xhis = min(nx, xhic + h)
+        yhis = min(ny, yhic + h)
+        assert xlos <= xloc and ylos <= yloc and xhis >= xhic and yhis >= yhic
+        # Calculate the slice of the reconvolved output to use.
+        x1 = xloc - xlos
+        y1 = yloc - ylos
+        x2 = x1 + xhic - xloc
+        y2 = y1 + yhic - yloc
+        for source, convolved in zip(self.sources, self.convolved):
+            source[yslice, xslice] = value
+            # Reconvolve the changed region.
+            reconv = scipy.signal.convolve(
+                source[ylos:yhis, xlos:xhis], self.kernel, mode='same')
+            # Copy the changed region into the full convolution.
+            convolved[conv_slice] = reconv[y1:y2, x1:x2]
+        return conv_slice
