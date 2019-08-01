@@ -58,6 +58,17 @@ class TestUtil(unittest.TestCase):
         rho = np.corrcoef(var_tot.reshape(-1), 1 / W.reshape(-1))[0, 1]
         self.assertTrue(rho > 0.8)
 
+    def test_mask_defects(self, nx=200, ny=100, bias=1000., rms=10., nhot=10, ndead=10, seed=123):
+        rng = np.random.RandomState(seed)
+        D = rng.normal(loc=bias, scale=rms, size = (ny, nx))
+        ihot = rng.choice(D.size, nhot)
+        idead = rng.choice(D.size, ndead)
+        D.reshape(-1)[ihot] = bias + 100 * rms
+        D.reshape(-1)[idead] = 0.
+        D, W = prepare(D)
+        W, nmasked = mask_defects(D, W)
+        self.assertEqual(nmasked, nhot + ndead)
+
 
 if __name__ == '__main__':
     unittest.main()

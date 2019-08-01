@@ -2,6 +2,7 @@
 """
 import numpy as np
 import scipy.signal
+import scipy.stats
 
 
 def downsample(data, downsampling, summary=np.sum, allow_trim=False):
@@ -138,7 +139,7 @@ class Convolutions(object):
         return conv_slice
 
 
-def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=True):
+def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=False):
     """Prepare image data for analysis.
     
     The input data D is converted to float32, if necessary, and an
@@ -191,3 +192,47 @@ def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=True):
     else:
         W = np.asarray(W, dtype=np.float32)
     return D, W
+
+
+def mask_defects(D, W, chisq_max=5e3, kernel_size=5, verbose=False):
+    # Initialize the kernel.
+    if kernel_size % 2 == 0:
+        raise ValueError('Kernel size must be odd.')
+    kernel = np.ones((kernel_size, kernel_size), np.float32)
+    nby2 = kernel_size // 2
+    kernel[nby2, nby2] = 0.
+    # Calculate the ivar-weighted image.
+    WD = np.array(W * D, np.float32)
+    # Convolve with the kernel.
+    C = Convolutions([WD, W], kernel)
+    WD, W = C.sources
+    WDf, Wf = C.convolved
+    # Calculate the Wf weighted residuals.
+    res = Wf * D - WDf
+    # Calculate residual chisq.
+    Wratio = np.divide(W, Wf ** 2, out=np.zeros_like(W), where=Wf != 0)
+    chisq = res ** 2 * Wratio
+    if verbose:
+        plt.imshow(chisq, interpolation='none', origin='lower')
+        plt.gca().axis('off')
+        plt.colorbar()
+        plt.show()
+    # Iteratively remove defects.
+    nmasked = 0
+    ny, nx = D.shape
+    while np.any(chisq > chisq_max):
+        # Find the next largest chisq.
+        iy, ix = np.unravel_index(np.argmax(chisq), (ny, nx))
+        if verbose:
+            print(iy, ix, np.max(chisq))
+        # Set this pixel's ivar to zero.
+        changed = C.set_source(iy, ix, 0)
+        # Update the chisq.
+        res[changed] = Wf[changed] * D[changed] - WDf[changed]
+        Wfsq = Wf[changed] ** 2
+        Wratio[changed] = 0
+        np.divide(
+            W[changed], Wfsq, out=Wratio[changed], where=Wfsq != 0)
+        chisq[changed] = res[changed] ** 2 * Wratio[changed]
+        nmasked += 1
+    return W, nmasked
