@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='desietcimg',
-    version='0.1.dev',
+    version='0.1.dev0',
     description='Sky camera and guide image analysis for the DESI exposure-time calculator',
     url='http://github.com/dkirkby/desietcimg',
     author='David Kirkby',
