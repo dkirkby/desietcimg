@@ -261,6 +261,7 @@ def add_fiber_signals(bg, signals, SCA, invgain=1.6, centroid_dxy=5, rng=None):
     ny, nx = bg.shape
     bins = (np.arange(nx + 1) - 0.5, np.arange(ny + 1) - 0.5)
     # Loop over fibers.
+    data = bg.copy()
     truth = collections.OrderedDict()
     for label, (xfiber, yfiber) in SCA.fibers.items():
         # Add some random jitter.
@@ -286,5 +287,5 @@ def add_fiber_signals(bg, signals, SCA, invgain=1.6, centroid_dxy=5, rng=None):
         # Bin in pixels.
         pixels, _, _ = np.histogram2d(x, y, bins=bins)
         # Convert to ADUs and add to the final image.
-        bg += pixels.T / invgain
-    return bg, truth
+        data += np.round(pixels.T / invgain).astype(data.dtype)
+    return data, truth
