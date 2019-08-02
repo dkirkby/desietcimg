@@ -1,5 +1,7 @@
 """General purpose utilities for imaging analysis.
 """
+import os
+
 import numpy as np
 import scipy.signal
 import scipy.stats
@@ -236,3 +238,20 @@ def mask_defects(D, W, chisq_max=5e3, kernel_size=5, verbose=False):
         chisq[changed] = res[changed] ** 2 * Wratio[changed]
         nmasked += 1
     return W, nmasked
+
+
+def get_data(name, must_exist=False):
+    """Return the absolute path to a named data file.
+    
+    Relative paths refer to the desietcimg/data/ folder of this installation.
+    Use an absolute path to override this behavior.
+    """
+    if os.path.isabs(name):
+        path = name
+    else:
+        import desietcimg
+        root = os.path.abspath(os.path.dirname(desietcimg.__file__))
+        path = os.path.join(root, 'data', name)
+    if must_exist and not os.path.exists(path):
+        raise RuntimeError('Non-existent data file: {0}'.format(path))
+    return path
