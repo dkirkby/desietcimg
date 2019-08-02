@@ -5,6 +5,8 @@ import functools
 import numpy as np
 import scipy.special
 
+import desietcimg.util
+
 
 def fiber_profile(x, y, r0, blur=0.1):
     """Radial profile of a blurred disk.
@@ -53,16 +55,16 @@ class SkyCameraAnalysis(object):
             raise ValueError('Expected binning in (1, 2, 3).')
         # Convert fiber diameter and blur to (unbinned) pixels.
         self.fiberdiam = fiberdiam_um / pixelsize_um
-        blur = blur_um / pixelsize_um
+        self.blur = blur_um / pixelsize_um
         # Calculate the stamp size to use as ssize = 2 * rsize + 1 (always odd).
-        self.rsize = int(np.ceil((margin * 0.5 * self.fiberdiam + 3 * blur) / binning))
+        self.rsize = int(np.ceil((margin * 0.5 * self.fiberdiam + 3 * self.blur) / binning))
         ssize = 2 * self.rsize + 1
         # Build templates in binned pixels for different sub-pixel offsets.
         self.dxy = np.linspace(-0.5 * search_pix / binning,
                                +0.5 * search_pix / binning, search_steps)
         self.T = np.empty((search_steps, search_steps, ssize, ssize))
         profile = functools.partial(
-            fiber_profile, r0=0.5 * self.fiberdiam / binning, blur=blur / binning)
+            fiber_profile, r0=0.5 * self.fiberdiam / binning, blur=self.blur / binning)
         for j, dy in enumerate(self.dxy):
             for i, dx in enumerate(self.dxy):
                 self.T[j, i] = desietcimg.util.make_template(
@@ -72,7 +74,7 @@ class SkyCameraAnalysis(object):
         self.fiber_area = np.pi * (0.5 * self.fiberdiam / binning) ** 2
         # We do not have any fiber location info yet.
         self.fibers = None
-     
+
     def validate(self, data):
         """
         """
@@ -153,7 +155,8 @@ class SkyCameraAnalysis(object):
         name : str
             Name of the json file to load.
         """
-        with open(name, 'r') as f:
+        path = desietcimg.util.get_data(name, must_exist=True)
+        with open(path, 'r') as f:
             self.fibers = json.load(f, object_pairs_hook=collections.OrderedDict)
         # Build a mask to select background pixels for noise measurement.
         self.mask = np.ones((self.ny // self.binning, self.nx // self.binning), bool)
@@ -240,5 +243,48 @@ class SkyCameraAnalysis(object):
         return results
 
 
-def simulate_main():
-    print('Simulating...')
+def init_signals(fibers, max_signal=1000., attenuation=0.95):
+    signals = collections.OrderedDict()
+    signal = max_signal
+    for label in fibers:
+        signals[label] = signal
+        signal *= attenuation
+    return signals
+
+
+def add_fiber_signals(bg, signals, SCA, invgain=1.6, centroid_dxy=5, rng=None):
+    """Add simulated fiber signals to a background image.
+    """
+    SCA.validate(bg)
+    rng = rng or np.random.RandomState()
+    # Construct pixel bin edges.
+    ny, nx = bg.shape
+    bins = (np.arange(nx + 1) - 0.5, np.arange(ny + 1) - 0.5)
+    # Loop over fibers.
+    truth = collections.OrderedDict()
+    for label, (xfiber, yfiber) in SCA.fibers.items():
+        # Add some random jitter.
+        w = 0.5 * centroid_dxy
+        xfiber += rng.uniform(-w, +w)
+        yfiber += rng.uniform(-w, +w)
+        # Convert to binned pixel coordinates.
+        xfiber /= SCA.binning
+        yfiber /= SCA.binning
+        # Generate the number of detected electrons to use.
+        nelec_mean = signals[label] * invgain
+        nelec_det = rng.poisson(lam=nelec_mean)
+        # Save true detected signal in ADU for this fiber.
+        truth[label] = nelec_det / invgain
+        # Generate electron positions w/o blur.
+        r = 0.5 * SCA.fiberdiam / SCA.binning * np.sqrt(rng.uniform(size=nelec_det))
+        phi = 2 * np.pi * rng.uniform(size=nelec_det)
+        x0 = xfiber + r * np.cos(phi)
+        y0 = yfiber + r * np.sin(phi)
+        # Apply blur.
+        x = rng.normal(loc=x0, scale=SCA.blur / SCA.binning)
+        y = rng.normal(loc=y0, scale=SCA.blur / SCA.binning)
+        # Bin in pixels.
+        pixels, _, _ = np.histogram2d(x, y, bins=bins)
+        # Convert to ADUs and add to the final image.
+        bg += pixels.T / invgain
+    return bg, truth

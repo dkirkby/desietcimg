@@ -80,3 +80,4 @@ def plot_sky_camera(SCA, size=4, pad=0.02, labels=True, params=True):
         if params:
             params = '{0:.1f} ADU SNR {1:.1f}'.format(fiber_flux, snr)
             ax.text(0.5, 0.05, params, fontsize=14, **kwargs)
+    return A
