@@ -10,11 +10,11 @@ setup(
     license='MIT',
     packages=['desietcimg'],
     install_requires=['numpy', 'scipy'],
-    include_package_data=False,
+    include_package_data=True, # specified in MANIFEST.in
     zip_safe=False,
     entry_points = {
         'console_scripts': [
-            'simskycam=desietcimg.sky:simulate_main'
+            'simskycam=desietcimg.scripts.sky:simulate'
         ],
     }
 )
