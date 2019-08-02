@@ -238,3 +238,7 @@ class SkyCameraAnalysis(object):
         # Save the results for plot_sky_camera.
         self.results = results
         return results
+
+
+def simulate_main():
+    print('Simulating...')

@@ -12,4 +12,9 @@ setup(
     install_requires=['numpy', 'scipy'],
     include_package_data=False,
     zip_safe=False,
+    entry_points = {
+        'console_scripts': [
+            'simskycam=desietcimg.sky:simulate_main'
+        ],
+    }
 )
