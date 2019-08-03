@@ -105,3 +105,4 @@ venv.bak/
 
 *.png
 *.fits
+*.csv
