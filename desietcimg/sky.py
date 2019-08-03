@@ -3,7 +3,10 @@ import collections
 import functools
 
 import numpy as np
+
 import scipy.special
+import scipy.signal
+import scipy.stats
 
 import desietcimg.util
 
