@@ -12,7 +12,19 @@ def moffat_profile(x, y, fwhm, sx=1, sy=1, beta=3.5):
 
 
 class GuideCameraAnalysis(object):
-    """
+    """Initialize the guide camera image analysis.
+
+    Parameters
+    ----------
+    stamp_size : int
+        Analysis will use square stamps with this pixel size. Must be odd.
+    pixel_size_um : float
+        The pixel  size in microns.
+    plate_scales : tuple of two floats
+        The nominal plate scales in microns / arcsec along the pixel x and y directions.
+    match_fwhm_arcsec : float
+        The nominal FWHM of a Moffat PSF with beta=3.5 used as a matched filter to detect
+        PSF-like sources.
     """
     def __init__(self, stamp_size=75, pixel_size_um=9, plate_scales=(70., 76.), match_fwhm_arcsec=1.1):
         assert stamp_size % 2 == 1
