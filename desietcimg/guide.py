@@ -37,15 +37,34 @@ class GuideCameraAnalysis(object):
         # Precompute PSF-weighted images for calculating second moments.
         dxy = np.arange(stamp_size) - 0.5 * (stamp_size - 1)
         self.xgrid, self.ygrid = np.meshgrid(dxy, dxy, sparse=False)
-        self.PSFxx = self.PSF0 * self.xgrid ** 2
-        self.PSFxy = self.PSF0 * self.xgrid * self.ygrid
-        self.PSFyy = self.PSF0 * self.ygrid ** 2
+        self.PSFxx = self.xgrid ** 2 * self.PSF0
+        self.PSFxy = self.xgrid * self.ygrid * self.PSF0
+        self.PSFyy = self.ygrid ** 2 * self.PSF0
 
-    def detect_sources(self, D, W=None, nsrc_max=12, chisq_max=1e4,
+    def detect_sources(self, D, W=None, nsrc_max=12, chisq_max=150.,
                        size_min=3.5, ratio_min=0.7, snr_min=50., cdist_max=3.):
+        """Detect PSF-like sources in an image.
+
+        Parameters
+        ----------
+        D : array
+            2D array of image pixel values with shape (ny, nx).
+        W : array or None
+            2D array of correponsding inverse-variance weights with shape (ny, nx).
+            When None, this array will be estimated from D.
+        nsrc_max : int
+            Maximum number of sources to detect.
+        chisq_max : float
+            Cut on chisq value passed to :func:`desietcimg.util.mask_defects`.
+        ...
+
+        Returns
+        -------
+        ...
+        """
         D, W = desietcimg.util.prepare(D, W)
-        W, nmasked = desietcimg.util.mask_defects(D, W, chisq_max, verbose=False)
-        print('masked', nmasked, 'defects')
+        # Mask the most obvious defects in the whole image with a very loose chisq cut.
+        W, nmasked = desietcimg.util.mask_defects(D, W, 1e4, verbose=False)
         ny, nx = D.shape
         h = self.rsize
         ss = self.stamp_size
@@ -83,7 +102,7 @@ class GuideCameraAnalysis(object):
             filtered[ylo:yhi, xlo:xhi] = save
 
             # Mask pixel defects in this stamp.
-            ivar, nmasked = desietcimg.util.mask_defects(stamp, ivar, 100., verbose=False)
+            ivar, nmasked = desietcimg.util.mask_defects(stamp, ivar, chisq_max, verbose=False)
             
             # Update the WD and W convolutions with the new ivar.
             CWD.set_source(slice(ylo, yhi), slice(xlo, xhi), stamp * ivar)
