@@ -166,7 +166,7 @@ def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=False):
     smoothing : int
         Number of pixels for boxcar smoothing of D used to estimate
         the signal variance contribution.
-        
+
     Returns
     -------
     tuple
@@ -174,6 +174,7 @@ def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=False):
     """
     # Find any saturated pixels.
     maxval = np.iinfo(D.dtype).max
+    print(D.dtype, D.shape, maxval)
     saturated = (D == maxval)
     if np.any(saturated):
         print(f'Found {np.count_nonzero(saturated)} saturated pixels.')
