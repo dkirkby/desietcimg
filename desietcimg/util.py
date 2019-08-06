@@ -172,9 +172,15 @@ def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=False):
     tuple
         Tuple D, W of 2D numpy float32 arrays.
     """
+    # Find any saturated pixels.
+    maxval = np.iinfo(D.dtype).max
+    saturated = (D == maxval)
+    if np.any(saturated):
+        print(f'Found {np.count_nonzero(saturated)} saturated pixels.')
+    # Convert to a float32 array.
     D = np.asarray(D, np.float32)
     # Select background pixels using sigma clipping.
-    clipped, _, _ = scipy.stats.sigmaclip(D)
+    clipped, _, _ = scipy.stats.sigmaclip(D[~saturated])
     # Subtract the clipped mean from the data.
     bgmean = np.mean(clipped)
     if verbose:
@@ -194,6 +200,8 @@ def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=False):
         W = np.divide(1., var, out=np.zeros_like(var, dtype=np.float32), where=var > 0)
     else:
         W = np.asarray(W, dtype=np.float32)
+    # Zero ivar for any saturated pixels.
+    W[saturated] = 0.
     return D, W
 
 
