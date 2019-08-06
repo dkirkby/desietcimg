@@ -172,3 +172,5 @@ class GuideCameraAnalysis(object):
             
             stamps.append((stamp, ivar))
             params.append((SNR, size, ratio))
+        self.stamps = stamps
+        self.params = params
