@@ -206,7 +206,9 @@ def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=False):
     return D, W
 
 
-def mask_defects(D, W, chisq_max=5e3, kernel_size=5, verbose=False):
+def mask_defects(D, W, chisq_max=5e3, kernel_size=5, inplace=False):
+    if not inplace:
+        W = W.copy()
     # Initialize the kernel.
     if kernel_size % 2 == 0:
         raise ValueError('Kernel size must be odd.')
@@ -222,13 +224,9 @@ def mask_defects(D, W, chisq_max=5e3, kernel_size=5, verbose=False):
     # Calculate the Wf weighted residuals.
     res = Wf * D - WDf
     # Calculate residual chisq.
-    Wratio = np.divide(W, Wf ** 2, out=np.zeros_like(W), where=Wf != 0)
+    denom = (W + Wf) * Wf
+    Wratio = np.divide(W, denom, out=np.zeros_like(W), where=denom != 0)
     chisq = res ** 2 * Wratio
-    if verbose:
-        plt.imshow(chisq, interpolation='none', origin='lower')
-        plt.gca().axis('off')
-        plt.colorbar()
-        plt.show()
     # Iteratively remove defects.
     nmasked = 0
     ny, nx = D.shape
@@ -241,10 +239,10 @@ def mask_defects(D, W, chisq_max=5e3, kernel_size=5, verbose=False):
         changed = C.set_source(iy, ix, 0)
         # Update the chisq.
         res[changed] = Wf[changed] * D[changed] - WDf[changed]
-        Wfsq = Wf[changed] ** 2
+        denom = (W[changed] + Wf[changed]) * Wf[changed]
         Wratio[changed] = 0
         np.divide(
-            W[changed], Wfsq, out=Wratio[changed], where=Wfsq != 0)
+            W[changed], denom, out=Wratio[changed], where=denom != 0)
         chisq[changed] = res[changed] ** 2 * Wratio[changed]
         nmasked += 1
     return W, nmasked
