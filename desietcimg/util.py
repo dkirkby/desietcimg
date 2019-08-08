@@ -174,9 +174,8 @@ def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=False):
     """
     # Find any saturated pixels.
     maxval = np.iinfo(D.dtype).max
-    print(D.dtype, D.shape, maxval)
     saturated = (D == maxval)
-    if np.any(saturated):
+    if verbose:
         print(f'Found {np.count_nonzero(saturated)} saturated pixels.')
     # Convert to a float32 array.
     D = np.asarray(D, np.float32)
@@ -206,7 +205,7 @@ def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=False):
     return D, W
 
 
-def mask_defects(D, W, chisq_max=5e3, kernel_size=5, inplace=False):
+def mask_defects(D, W, chisq_max=5e3, kernel_size=3, min_neighbors=5, inplace=False):
     if not inplace:
         W = W.copy()
     # Initialize the kernel.
@@ -233,8 +232,15 @@ def mask_defects(D, W, chisq_max=5e3, kernel_size=5, inplace=False):
     while np.any(chisq > chisq_max):
         # Find the next largest chisq.
         iy, ix = np.unravel_index(np.argmax(chisq), (ny, nx))
-        if verbose:
-            print(iy, ix, np.max(chisq))
+        # Count the number of surrounding pixels with nonzero ivar.
+        xlo, ylo = max(0, ix - nby2), max(0, iy - nby2)
+        xhi, yhi = min(nx, ix + nby2 + 1), min(ny, iy + nby2 + 1)
+        # Subtract 1 since chisq > 0 means that W > 0 for the central pixel.
+        nonzero = np.count_nonzero(W[ylo:yhi, xlo:xhi]) - 1
+        if nonzero < min_neighbors:
+            # Zero this pixel's chisq without changing its weight.
+            chisq[iy, ix] = 0.
+            continue
         # Set this pixel's ivar to zero.
         changed = C.set_source(iy, ix, 0)
         # Update the chisq.

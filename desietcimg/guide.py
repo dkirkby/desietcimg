@@ -64,7 +64,7 @@ class GuideCameraAnalysis(object):
         """
         D, W = desietcimg.util.prepare(D, W)
         # Mask the most obvious defects in the whole image with a very loose chisq cut.
-        W, nmasked = desietcimg.util.mask_defects(D, W, 1e4, verbose=False)
+        W, nmasked = desietcimg.util.mask_defects(D, W, 1e4, inplace=True)
         ny, nx = D.shape
         h = self.rsize
         ss = self.stamp_size
@@ -102,7 +102,7 @@ class GuideCameraAnalysis(object):
             filtered[ylo:yhi, xlo:xhi] = save
 
             # Mask pixel defects in this stamp.
-            ivar, nmasked = desietcimg.util.mask_defects(stamp, ivar, chisq_max, verbose=False)
+            ivar, nmasked = desietcimg.util.mask_defects(stamp, ivar, chisq_max, inplace=True)
             
             # Update the WD and W convolutions with the new ivar.
             CWD.set_source(slice(ylo, yhi), slice(xlo, xhi), stamp * ivar)
@@ -171,6 +171,6 @@ class GuideCameraAnalysis(object):
                     fontsize=22, fontweight='bold', color='w' if keep else 'k', transform=ax.transAxes)
             
             stamps.append((stamp, ivar))
-            params.append((SNR, size, ratio))
+            params.append((SNR, size, ratio, slice(ylo, yhi), slice(xlo, xhi)))
         self.stamps = stamps
         self.params = params
