@@ -41,7 +41,7 @@ class GuideCameraAnalysis(object):
         self.PSFxy = self.xgrid * self.ygrid * self.PSF0
         self.PSFyy = self.ygrid ** 2 * self.PSF0
 
-    def detect_sources(self, D, W=None, nsrc_max=12, chisq_max=150.,
+    def detect_sources(self, D, W=None, nsrc_max=12, chisq_max=150., min_central=18,
                        size_min=3.5, ratio_min=0.7, snr_min=50., cdist_max=3.):
         """Detect PSF-like sources in an image.
 
@@ -55,7 +55,11 @@ class GuideCameraAnalysis(object):
         nsrc_max : int
             Maximum number of sources to detect.
         chisq_max : float
-            Cut on chisq value passed to :func:`desietcimg.util.mask_defects`.
+            Cut on chisq value passed to :func:`desietcimg.util.mask_defects` for
+            each candidate stamp.
+        min_central : int
+            Minimum number of unmasked pixels required in the central 5x5 region.
+            Used to reject saturated stars.
         ...
 
         Returns
@@ -70,7 +74,7 @@ class GuideCameraAnalysis(object):
         ss = self.stamp_size
         # Calculate the ivar-weighted image.
         WD = np.array(W * D, np.float32)
-        # Convolve the image with each filter.
+        # Convolve the image (WD and W) with the matched PSF filter.
         CWD = desietcimg.util.Convolutions([WD], self.PSF0)
         WD = CWD.sources[0]
         WDf = CWD.convolved[0]
@@ -125,6 +129,11 @@ class GuideCameraAnalysis(object):
             filtered[changed] = 0
             filtered[changed] = np.divide(
                 WDf[changed], Wf[changed], out=filtered[changed], where=Wf[changed] > 0)
+
+            # Count the number of unmasked pixels in the central 5x5.
+            ncentral = np.sum(ivar[h - 2:h + 3, h - 2:h + 3] > 0)
+            if ncentral < min_central:
+                continue
 
             # Calculate the stamp's centroid (w/o centered PSF weights)
             clipped = np.maximum(0., stamp)
