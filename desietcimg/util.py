@@ -142,7 +142,7 @@ class Convolutions(object):
         return conv_slice
 
 
-def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=False):
+def prepare(D, W=None, invgain=1.6, smoothing=3, verbose=False):
     """Prepare image data for analysis.
     
     The input data D is converted to float32, if necessary, and an
@@ -164,8 +164,8 @@ def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=False):
         Inverse gain in units of e/ADU to assume for estimating
         the signal variance contribution.
     smoothing : int
-        Number of pixels for boxcar smoothing of D used to estimate
-        the signal variance contribution.
+        Number of pixels for median filtering of D used to estimate
+        the signal variance contribution. Must be odd.
 
     Returns
     -------
@@ -192,9 +192,10 @@ def prepare(D, W=None, invgain=1.6, smoothing=5, verbose=False):
         if verbose:
             print('Estimated background RMS {0:.1f} ADU.'.format(np.sqrt(bgvar)))
         var = bgvar * np.ones_like(D)
-        # Estimate additional variance due to smoothed signal.
-        smoother = np.ones((smoothing, smoothing)) / smoothing ** 2
-        Dsmoothed = scipy.signal.convolve(D, smoother, mode='same')
+        # Estimate additional variance due to median-filtered signal.
+        Dsmoothed = scipy.signal.medfilt2d(D, smoothing)
+        #smoother = np.ones((smoothing, smoothing)) / smoothing ** 2
+        #Dsmoothed = scipy.signal.convolve(D, smoother, mode='same')
         var += np.maximum(0., Dsmoothed) / invgain
         # Build an inverse variance image with zeros where var is zero.
         W = np.divide(1., var, out=np.zeros_like(var, dtype=np.float32), where=var > 0)
