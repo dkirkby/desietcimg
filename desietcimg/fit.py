@@ -45,26 +45,41 @@ class GaussFitter(object):
         self.bgmask[:, -bgmargin:] = True
         self.sigmask = ~self.bgmask
         self.nsigmask = np.count_nonzero(self.sigmask)
+        # Name each of our (transformed) parameters.
+        self.plabels = ('b', 'f', 'x0', 'y0', 's', 'g1', 'g2')
+
+    def transform(self, theta):
+        """Undo the non-linear transforms that implement our parameter constraints:
+        s > 0, f > 0, g1 ** 2 + g2 ** 2 < 1
+        """
+        b, logf, x0, y0, logs, G1, G2 = theta
+        s = np.exp(logs)
+        f = np.exp(logf)
+        Gscale = np.sqrt(1 + G1 ** 2 + G2 ** 2)
+        g1 = G1 / Gscale
+        g2 = G2 / Gscale
+        return b, f, x0, y0, s, g1, g2
     
-    def predict(self, b, logf, x0, y0, logs, g1, g2):
+    def predict(self, b, f, x0, y0, s, g1, g2):
         """Predict data with specified parameters.
         """
+        # Calculate pixel coordinates relative to Gaussian center.
         dx = self.xy - x0
         dy = (self.xy - y0).reshape(-1, 1)
+        # Calculate the 2nd-moment matrix normalization.
         gsq = g1 ** 2 + g2 ** 2
-        s = np.exp(logs)
         norm = s ** 2 * (1 - gsq)
         Qinvxx = (1 + gsq - 2 * g1) / norm
         Qinvxy = -2 * g2 / norm
         Qinvyy = (1 + gsq + 2 * g1) / norm
         arg = Qinvxx * dx ** 2 + 2 * Qinvxy * dx * dy + Qinvyy * dy ** 2
         signal = np.exp(-0.5 * arg)
-        return b + np.exp(logf) * signal / signal.sum()
-    
-    def nlprior(self, theta):
+        # Combine normalized signal and background.
+        return b + f * signal / signal.sum()
+
+    def nlprior(self, b, f, x0, y0, s, g1, g2):
         """Evaluate -log P(theta)
         """
-        _, _, x0, y0, _, g1, g2 = theta
         r0sq = x0 ** 2 + y0 ** 2
         gsq = g1 ** 2 + g2 ** 2
         return 0.5 * r0sq / self.r0sig ** 2  + 0.5 * gsq / self.gsig ** 2
@@ -72,9 +87,10 @@ class GaussFitter(object):
     def nlpost(self, theta, D, W):
         """Evaluate -log P(theta | D, W)
         """
-        Dpred = self.predict(*theta)
+        params = self.transform(theta)
+        Dpred = self.predict(*params)
         nllike = 0.5 * np.sum(W * (D - Dpred) ** 2)
-        return nllike + self.nlprior(theta)
+        return nllike + self.nlprior(*params)
     
     def fit(self, D, W, s0=5):
         """Fit an image D with inverse variance weights W.
@@ -97,9 +113,13 @@ class GaussFitter(object):
         assert ny == nx
         assert D.shape == W.shape
         assert np.all(W >= 0)
+        results = dict(success=False, message='Never got started', status=-1)
         # Estimate the background and signal parameters.
-        bg = np.sum(W * D * self.bgmask) / np.sum(W * self.bgmask)
-        sig = np.sum(W * (D - bg) * self.sigmask) / np.sum(W * self.sigmask) * self.nsigmask
+        Wsum = np.sum(W * self.bgmask)
+        bg = np.sum(W * D * self.bgmask) / Wsum if Wsum > 0 else 0
+        Wsum = np.sum(W * self.sigmask)
+        WDsum = np.sum(W * (D - bg) * self.sigmask)
+        sig = WDsum / Wsum * self.nsigmask if (WDsum > 0 and Wsum > 0) else 1
         # Build the vector of initial parameter values.
         self.theta0 = np.array([bg, np.log(sig), 0., 0., np.log(s0), 0., 0.])
         # Run the optimizer and return the result.
@@ -108,11 +128,9 @@ class GaussFitter(object):
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
                 results = scipy.optimize.minimize(self.nlpost, self.theta0, args=(D, W), **self.kwargs)
-            if results.success:
-                results.p = dict(zip(('b', 'f', 'x0', 'y0', 's', 'g1', 'g2'), results.x))
-                results.p['f'] = np.exp(results.p['f'])
-                results.p['s'] = np.exp(results.p['s'])
+            if results.success or results.status == 2:
+                results.p = dict(zip(self.plabels, self.transform(results.x)))
         except Exception as e:
             print(str(e))
-            results = dict(success=False, message=str(e))
+            results['message'] = str(e)
         return results

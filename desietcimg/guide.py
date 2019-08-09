@@ -3,6 +3,7 @@ import functools
 import numpy as np
 
 import desietcimg.util
+import desietcimg.fit
 
 
 def moffat_profile(x, y, fwhm, sx=1, sy=1, beta=3.5):
@@ -34,12 +35,11 @@ class GuideCameraAnalysis(object):
         profile = functools.partial(moffat_profile, fwhm=match_fwhm_arcsec,
                                     sx=plate_scales[0] / pixel_size_um, sy=plate_scales[1] / pixel_size_um)
         self.PSF0 = desietcimg.util.make_template(stamp_size, profile, normalized=True)
-        # Precompute PSF-weighted images for calculating second moments.
+        # Define pixel coordinate grids for moment calculations.
         dxy = np.arange(stamp_size) - 0.5 * (stamp_size - 1)
         self.xgrid, self.ygrid = np.meshgrid(dxy, dxy, sparse=False)
-        self.PSFxx = self.xgrid ** 2 * self.PSF0
-        self.PSFxy = self.xgrid * self.ygrid * self.PSF0
-        self.PSFyy = self.ygrid ** 2 * self.PSF0
+        # Initialize fitter.
+        self.fitter = desietcimg.fit.GaussFitter(stamp_size)
 
     def detect_sources(self, D, W=None, nsrc_max=12, chisq_max=150., min_central=18,
                        size_min=3.5, ratio_min=0.7, snr_min=50., cdist_max=3.):
@@ -117,23 +117,53 @@ class GuideCameraAnalysis(object):
                 WDf[changed], Wf[changed], out=filtered[changed], where=Wf[changed] > 0)
 
             # Calculate the change in the filtered value after the masking.
-            # Can assume that the denominator is non-zero here.
+            # We can assume that the denominator is non-zero here.
             fnew = np.sum(stamp * ivar * self.PSF0) / np.sum(ivar * self.PSF0)
 
             if fnew < f2nd:
-                # This is no longer the next stamp to consider.
+                # This stamp had a artificially high filtered value due to pixel
+                # defects so skip it now.  It might still come back at a lower
+                # value after masking.
                 continue
 
-            # Redo the filtering with the data in this stamp set to zero.
+            # Redo the filtering with the data in this stamp set to zero
+            # so we don't pick this stamp again.
             changed = CWD.set_source(slice(ylo, yhi), slice(xlo, xhi), 0)
             filtered[changed] = 0
             filtered[changed] = np.divide(
                 WDf[changed], Wf[changed], out=filtered[changed], where=Wf[changed] > 0)
 
             # Count the number of unmasked pixels in the central 5x5.
-            ncentral = np.sum(ivar[h - 2:h + 3, h - 2:h + 3] > 0)
+            nwindow = 2
+            c_slice = slice(h - nwindow, h + nwindow + 1)
+            ncentral = np.sum(ivar[c_slice, c_slice] > 0)
             if ncentral < min_central:
+                # This stamp has too many masked pixels in the central core to
+                # useful. This is normal for saturated stars.
                 continue
+
+            '''
+            # Stamps are sometimes selected on the wings of a previously selected
+            # bright star.  To detect this condition, calculate the average pixel flux
+            # in 5x5 windows at N, E, S, W edges and compare with a central window.
+            central_avg = (
+                np.sum(ivar[c_slice, c_slice] * stamp[c_slice, c_slice]) /
+                np.sum(ivar[c_slice, c_slice]))
+            lo_slice = slice(0, 2 * nwindow + 1)
+            hi_slice = slice(ss - 2 * nwindow - 1, ss)
+            wing_condition = False
+            for x_slice, y_slice in ((lo_slice, None), (hi_slice, None), (None, lo_slice), (None, hi_slice)):
+                ivar_sum = np.sum(ivar[y_slice, x_slice])
+                if ivar_sum == 0:
+                    continue
+                edge_avg = np.sum(ivar[y_slice, x_slice] * stamp[y_slice, x_slice]) / ivar_sum
+                print(x_slice, y_slice, edge_avg, central_avg)
+                if edge_avg > central_avg:
+                    wing_condition = True
+                    break
+            if wing_condition:
+                continue
+            '''
 
             # Calculate the stamp's centroid (w/o centered PSF weights)
             clipped = np.maximum(0., stamp)
@@ -149,6 +179,7 @@ class GuideCameraAnalysis(object):
             if cdist > cdist_max:
                 continue
 
+            '''
             # Calculate the stamp's template-weighted second moments
             # relative to the stamp center.
             M0 = np.sum(self.PSF0 * clipped * ivar)
@@ -173,13 +204,23 @@ class GuideCameraAnalysis(object):
 
             # Is this stamp sufficiently PSF like?
             keep = (SNR > snr_min) and (size > size_min) and (ratio > ratio_min)
+            '''
 
-            desietcimg.plot.plot_image(stamp, ivar, cov=[[Mxx, Mxy], [Mxy, Myy]], ax=ax)            
-            label = f'$\\nu$ {SNR:.1f} $\\sigma$ {size:.1f} $r$ {ratio:.2f}'
-            ax.text(0.5, 0.95, label, horizontalalignment='center', verticalalignment='center',
-                    fontsize=22, fontweight='bold', color='w' if keep else 'k', transform=ax.transAxes)
-            
+            desietcimg.plot.plot_image(stamp, ivar, ax=ax)
+
+            # Fit a single Gaussian + constant background to this stamp.
+            results = self.fitter.fit(stamp, ivar)
+
+            if results.success or results.status == 2:
+                ls = '-' if results.success else ':'
+                desietcimg.plot.draw_ellipse(
+                    ax, results.p['x0'], results.p['y0'], results.p['s'], results.p['g1'], results.p['g2'], ls=ls)
+                '''
+                label = f'$\\nu$ {SNR:.1f} $\\sigma$ {size:.1f} $r$ {ratio:.2f}'
+                ax.text(0.5, 0.95, label, horizontalalignment='center', verticalalignment='center',
+                        fontsize=22, fontweight='bold', color='w' if keep else 'k', transform=ax.transAxes)
+                '''
             stamps.append((stamp, ivar))
-            params.append((SNR, size, ratio, slice(ylo, yhi), slice(xlo, xhi)))
+            params.append((results, slice(ylo, yhi), slice(xlo, xhi)))
         self.stamps = stamps
         self.params = params

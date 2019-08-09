@@ -5,27 +5,31 @@ import matplotlib.pyplot as plt
 import matplotlib.patches
 
 
-def draw_ellipse_cov(ax, center, cov, nsigmas=2, **ellipseopts):
-    U, s, _ = np.linalg.svd(cov)
-    angle = np.degrees(np.arctan2(U[1, 0], U[0, 0]))
-    width, height = 2 * nsigmas * np.sqrt(s.T)
-    kwargs = dict(color='w', ls='-', lw=2, fill=False)
+def draw_ellipse(ax, x0, y0, s, g1, g2, nsigmas=1, **ellipseopts):
+    g = np.sqrt(g1 ** 2 + g2 ** 2)
+    if g > 1:
+        raise ValueError('g1 ** 2 + g2 ** 2 > 1')
+    center = np.array([x0, y0])
+    angle = np.rad2deg(0.5 * np.arctan2(g2, g1))
+    ratio = np.sqrt((1 + g) / (1 - g))
+    width = 2 * s * ratio * nsigmas
+    height  = 2 * s / ratio * nsigmas
+    kwargs = dict(color='r', ls='-', lw=2, alpha=0.7, fill=False)
     kwargs.update(ellipseopts)
     ellipse = matplotlib.patches.Ellipse(center, width, height, angle, **kwargs)
     ax.add_artist(ellipse)
 
 
-def plot_image(D, W, cov=None, center=[0, 0], ax=None):
-    data = D.copy()
-    data[W == 0] = np.nan
+def plot_image(D, W=None, ax=None):
+    if W is not None and np.any(W == 0):
+        D = D.copy()
+        D[W == 0] = np.nan
     ax = ax or plt.gca()
-    I = ax.imshow(data, interpolation='none', origin='lower')
-    #plt.colorbar(I, ax=ax)
-    if cov is not None:
-        ny, nx = data.shape
-        center = np.asarray(center) + 0.5 * (np.array(data.shape) - 1)
-        draw_ellipse_cov(ax, center, cov)
+    h, w = D.shape
+    I = ax.imshow(D, interpolation='none', origin='lower',
+                  extent=[-0.5 * w, 0.5 * w, -0.5 * h, 0.5 * h])
     ax.axis('off')
+    return ax
 
 
 class Axes(object):
