@@ -20,13 +20,15 @@ def draw_ellipse(ax, x0, y0, s, g1, g2, nsigmas=1, **ellipseopts):
     ax.add_artist(ellipse)
 
 
-def plot_image(D, W=None, ax=None):
+def plot_image(D, W=None, ax=None, cmap='viridis', masked_color='pink'):
     if W is not None and np.any(W == 0):
         D = D.copy()
         D[W == 0] = np.nan
     ax = ax or plt.gca()
+    cmap = matplotlib.cm.get_cmap(cmap)
+    cmap.set_bad(color=masked_color)
     h, w = D.shape
-    I = ax.imshow(D, interpolation='none', origin='lower',
+    I = ax.imshow(D, interpolation='none', origin='lower', cmap=cmap,
                   extent=[-0.5 * w, 0.5 * w, -0.5 * h, 0.5 * h])
     ax.axis('off')
     return ax
