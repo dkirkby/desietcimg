@@ -215,11 +215,10 @@ class GuideCameraAnalysis(object):
                 ls = '-' if results.success else ':'
                 desietcimg.plot.draw_ellipse(
                     ax, results.p['x0'], results.p['y0'], results.p['s'], results.p['g1'], results.p['g2'], ls=ls)
-                '''
-                label = f'$\\nu$ {SNR:.1f} $\\sigma$ {size:.1f} $r$ {ratio:.2f}'
+                label = f'$\\nu$ {results.snr:.1f} s {results.p["s"]:.1f} g {results.p["gmag"]:.3f}'
                 ax.text(0.5, 0.95, label, horizontalalignment='center', verticalalignment='center',
-                        fontsize=22, fontweight='bold', color='w' if keep else 'k', transform=ax.transAxes)
-                '''
+                        fontsize=22, fontweight='bold', color='w', transform=ax.transAxes)
+
             stamps.append((stamp, ivar))
             params.append((results, slice(ylo, yhi), slice(xlo, xhi)))
         self.stamps = stamps

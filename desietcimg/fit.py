@@ -130,6 +130,11 @@ class GaussFitter(object):
                 results = scipy.optimize.minimize(self.nlpost, self.theta0, args=(D, W), **self.kwargs)
             if results.success or results.status == 2:
                 results.p = dict(zip(self.plabels, self.transform(results.x)))
+                results.p['gmag'] = np.sqrt(results.p['g1'] ** 2 + results.p['g2'] ** 2)
+                # Render with the best-fit parameters.
+                results.model = P = self.predict(*self.transform(results.x))
+                # Calculate the P-weighted signal-to-noise ratio.
+                results.snr = np.sum(D * P * W) / np.sqrt(np.sum(P ** 2 * W))
         except Exception as e:
             print(str(e))
             results['message'] = str(e)
