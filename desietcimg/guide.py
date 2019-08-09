@@ -211,11 +211,11 @@ class GuideCameraAnalysis(object):
             # Fit a single Gaussian + constant background to this stamp.
             results = self.fitter.fit(stamp, ivar)
 
-            if results.success or results.status == 2:
+            if results.success: # or results.status == 2:
                 ls = '-' if results.success else ':'
                 desietcimg.plot.draw_ellipse(
                     ax, results.p['x0'], results.p['y0'], results.p['s'], results.p['g1'], results.p['g2'], ls=ls)
-                label = f'$\\nu$ {results.snr:.1f} s {results.p["s"]:.1f} g {results.p["gmag"]:.3f}'
+                label = f'$\\nu$ {results.snr:.1f} s {results.p["s"]:.1f} g {results.p["gmag"]:.2f}'
                 ax.text(0.5, 0.95, label, horizontalalignment='center', verticalalignment='center',
                         fontsize=22, fontweight='bold', color='w', transform=ax.transAxes)
 

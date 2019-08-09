@@ -128,7 +128,7 @@ class GaussFitter(object):
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
                 results = scipy.optimize.minimize(self.nlpost, self.theta0, args=(D, W), **self.kwargs)
-            if results.success or results.status == 2:
+            if results.success: # or results.status == 2:
                 results.p = dict(zip(self.plabels, self.transform(results.x)))
                 results.p['gmag'] = np.sqrt(results.p['g1'] ** 2 + results.p['g2'] ** 2)
                 # Render with the best-fit parameters.
