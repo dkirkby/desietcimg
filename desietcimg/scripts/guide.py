@@ -20,7 +20,7 @@ from desietcimg.db import *
 db = None
 ExpInfo = None
 
-def get_pm_path(expid, night=None, root=Path('/project/projectdirs/desi/spectro/data/')):
+def get_pm_path(expid, night=None, dbname='db.yaml', root=Path('/project/projectdirs/desi/spectro/data/')):
     global db, ExpInfo
     if night is None:
         if db is None:
@@ -65,7 +65,7 @@ def ciproc():
     for input in args.input:
         try:
             expid = int(input)
-            files.append(get_pm_path(expid))
+            files.append(get_pm_path(expid, dbname=args.db))
             continue
         except ValueError:
             pass
@@ -77,7 +77,7 @@ def ciproc():
             with open(input, 'r') as f:
                 for line in f.readlines():
                     expid = int(line.strip())
-                    files.append(get_pm_path(expid))
+                    files.append(get_pm_path(expid, dbname=args.db))
             continues
         elif input.endswith('.fits') or input.endswith('.fits.fz'):
             files.append(input)
