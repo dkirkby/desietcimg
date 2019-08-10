@@ -41,9 +41,10 @@ class GuideCameraAnalysis(object):
         # Initialize fitter.
         self.fitter = desietcimg.fit.GaussFitter(stamp_size)
 
-    def detect_sources(self, D, W=None, nsrc_max=12, chisq_max=150., min_central=18,
-                       size_min=3.5, ratio_min=0.7, snr_min=50., cdist_max=3.):
+    def detect_sources(self, D, W=None, nsrc=12, chisq_max=150., min_central=18, cdist_max=3.):
         """Detect PSF-like sources in an image.
+
+        The results are saved in :attr:`stamps` and :attr:`params`.
 
         Parameters
         ----------
@@ -52,19 +53,17 @@ class GuideCameraAnalysis(object):
         W : array or None
             2D array of correponsding inverse-variance weights with shape (ny, nx).
             When None, this array will be estimated from D.
-        nsrc_max : int
-            Maximum number of sources to detect.
+        nsrc : int
+            Number of candiate PSF sources to detect, in (roughly) decreasing order of SNR.
         chisq_max : float
             Cut on chisq value passed to :func:`desietcimg.util.mask_defects` for
-            each candidate stamp.
+            each candidate stamp.  Used to reject fakes due to hot pixels or cosmics.
         min_central : int
             Minimum number of unmasked pixels required in the central 5x5 region.
             Used to reject saturated stars.
-        ...
-
-        Returns
-        -------
-        ...
+        cdist_max : float
+            Maximum distance of the image centroid from the stamp center.
+            Used to reject the wings of bright stars.
         """
         D, W = desietcimg.util.prepare(D, W)
         # Mask the most obvious defects in the whole image with a very loose chisq cut.
@@ -83,10 +82,9 @@ class GuideCameraAnalysis(object):
         filtered = np.divide(WDf, Wf, out=np.zeros_like(W), where=Wf > 0)
         inset = filtered[h:-h, h:-h]
         fmin = np.min(filtered)
-        stamps = []
-        params = []
-        AX = desietcimg.plot.Axes(nsrc_max)
-        while len(stamps) < nsrc_max:
+        stamps, params = [], []
+        AX = desietcimg.plot.Axes(nsrc)
+        while len(stamps) < nsrc:
             ax = AX.axes[len(stamps)]
 
             # Find the largest filtered value in the inset region and its indices [iy, ix].
@@ -142,30 +140,9 @@ class GuideCameraAnalysis(object):
                 # useful. This is normal for saturated stars.
                 continue
 
-            '''
             # Stamps are sometimes selected on the wings of a previously selected
-            # bright star.  To detect this condition, calculate the average pixel flux
-            # in 5x5 windows at N, E, S, W edges and compare with a central window.
-            central_avg = (
-                np.sum(ivar[c_slice, c_slice] * stamp[c_slice, c_slice]) /
-                np.sum(ivar[c_slice, c_slice]))
-            lo_slice = slice(0, 2 * nwindow + 1)
-            hi_slice = slice(ss - 2 * nwindow - 1, ss)
-            wing_condition = False
-            for x_slice, y_slice in ((lo_slice, None), (hi_slice, None), (None, lo_slice), (None, hi_slice)):
-                ivar_sum = np.sum(ivar[y_slice, x_slice])
-                if ivar_sum == 0:
-                    continue
-                edge_avg = np.sum(ivar[y_slice, x_slice] * stamp[y_slice, x_slice]) / ivar_sum
-                print(x_slice, y_slice, edge_avg, central_avg)
-                if edge_avg > central_avg:
-                    wing_condition = True
-                    break
-            if wing_condition:
-                continue
-            '''
-
-            # Calculate the stamp's centroid (w/o centered PSF weights)
+            # bright star.  To detect this condition, calculate the stamp's
+            # centroid (w/o centered PSF weights).
             clipped = np.maximum(0., stamp)
             M0 = np.sum(clipped * ivar)
             Mx = np.sum(self.xgrid * clipped * ivar) / M0
@@ -178,33 +155,6 @@ class GuideCameraAnalysis(object):
             # we have found the wing of a previously found bright star.
             if cdist > cdist_max:
                 continue
-
-            '''
-            # Calculate the stamp's template-weighted second moments
-            # relative to the stamp center.
-            M0 = np.sum(self.PSF0 * clipped * ivar)
-            Mxx = np.sum(self.PSFxx * clipped * ivar) / M0
-            Mxy = np.sum(self.PSFxy * clipped * ivar) / M0
-            Myy = np.sum(self.PSFyy * clipped * ivar) / M0
-   
-            # Calculate the determinant size.
-            det = Mxx * Myy - Mxy ** 2
-            size = det ** 0.25 if det > 0 else 0.
-            
-            # Calculate the minor / major axis ratio.
-            trace = Mxx + Myy
-            diff = np.sqrt((Mxx - Myy) ** 2 + 4 * Mxy ** 2)
-            major = np.sqrt(0.5 * (trace + diff))
-            minor = np.sqrt(0.5 * (trace - diff))
-            ratio = minor / major
-            #print(trace, diff, major, minor, ratio)
-            
-            # Calculate the SNR2 as the weighted mean of the pixel SNR2 value.
-            SNR = np.sum(stamp * self.PSF0 * ivar) / np.sqrt(np.sum(self.PSF0 ** 2 * ivar))
-
-            # Is this stamp sufficiently PSF like?
-            keep = (SNR > snr_min) and (size > size_min) and (ratio > ratio_min)
-            '''
 
             desietcimg.plot.plot_image(stamp, ivar, ax=ax)
 
