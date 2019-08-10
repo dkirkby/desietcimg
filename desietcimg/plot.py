@@ -94,21 +94,23 @@ def plot_guide_results(GCR, size=4, pad=0.02, ellipses=True, params=True):
     if GCR.stamps is None or GCR.results is None:
         raise RuntimeError('No results available to plot.')
     nstamps = GCR.meta['NSRC']
-    rsize = GCR.meta['STAMPSIZE'] // 2
+    rsize = GCR.meta['SSIZE'] // 2
     A = Axes(nstamps, size, pad)
     for k in range(nstamps):
         ax = A.axes[k]
         plot_image(*GCR.stamps[k], ax=ax)
         kwargs = dict(verticalalignment='center', horizontalalignment='center',
                       transform=ax.transAxes, color='w', fontweight='bold')
-        fit, x_slice, y_slice = GCR.results[k]
+        result, y_slice, x_slice = GCR.results[k]
         ix, iy = x_slice.start + rsize, y_slice.start + rsize
         label = 'x={0:04d} y={1:04d}'.format(ix, iy)
         ax.text(0.5, 0.05, label, fontsize=16, **kwargs)
-        if fit.success:
+        if result['success']:
             if ellipses:
-                draw_ellipse(ax, fit.p['x0'], fit.p['y0'],
-                    fit.p['s'], fit.p['g1'], fit.p['g2'])
+                draw_ellipse(ax, result['x0'], result['y0'],
+                             result['s'], result['g1'], result['g2'])
             if params:
-                label = f'$\\nu$ {fit.snr:.1f} s {fit.p["s"]:.1f} g {fit.p["gmag"]:.2f}'
+                g = np.sqrt(result['g1'] ** 2 + result['g2'] ** 2)
+                label = f'$\\nu$ {result["snr"]:.1f} s {result["s"]:.1f} g {g:.2f}'
                 ax.text(0.5, 0.95, label, fontsize=18, **kwargs)
+    return A

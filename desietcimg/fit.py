@@ -45,8 +45,10 @@ class GaussFitter(object):
         self.bgmask[:, -bgmargin:] = True
         self.sigmask = ~self.bgmask
         self.nsigmask = np.count_nonzero(self.sigmask)
-        # Name each of our (transformed) parameters.
-        self.plabels = ('b', 'f', 'x0', 'y0', 's', 'g1', 'g2')
+
+    # Name each of our (transformed) parameters.
+    pnames = ('b', 'f', 'x0', 'y0', 's', 'g1', 'g2')
+
 
     def transform(self, theta):
         """Undo the non-linear transforms that implement our parameter constraints:
@@ -113,7 +115,8 @@ class GaussFitter(object):
         assert ny == nx
         assert D.shape == W.shape
         assert np.all(W >= 0)
-        results = dict(success=False, message='Never got started', status=-1)
+        # Initialize default (unsuccessful) result.
+        result = dict(success=False, message='Never got started', status=-1, snr=-1)
         # Estimate the background and signal parameters.
         Wsum = np.sum(W * self.bgmask)
         bg = np.sum(W * D * self.bgmask) / Wsum if Wsum > 0 else 0
@@ -127,15 +130,17 @@ class GaussFitter(object):
             # Silently ignore any warnings.
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
-                results = scipy.optimize.minimize(self.nlpost, self.theta0, args=(D, W), **self.kwargs)
-            if results.success: # or results.status == 2:
-                results.p = dict(zip(self.plabels, self.transform(results.x)))
-                results.p['gmag'] = np.sqrt(results.p['g1'] ** 2 + results.p['g2'] ** 2)
+                fitresult = scipy.optimize.minimize(self.nlpost, self.theta0, args=(D, W), **self.kwargs)
+                result['success'] = fitresult.success
+                result['message'] = fitresult.message
+                result['status'] = fitresult.status
+            if fitresult.success:
+                result.update(dict(zip(self.pnames, self.transform(fitresult.x))))
                 # Render with the best-fit parameters.
-                results.model = P = self.predict(*self.transform(results.x))
+                P = self.predict(*self.transform(fitresult.x))
                 # Calculate the P-weighted signal-to-noise ratio.
-                results.snr = np.sum(D * P * W) / np.sqrt(np.sum(P ** 2 * W))
+                result['snr'] = np.sum(D * P * W) / np.sqrt(np.sum(P ** 2 * W))
         except Exception as e:
             print(str(e))
-            results['message'] = str(e)
-        return results
+            result['message'] = str(e)
+        return result

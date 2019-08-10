@@ -50,8 +50,6 @@ class GuideCameraAnalysis(object):
                        nsrc=12, chisq_max=150., min_central=18, cdist_max=3.):
         """Detect PSF-like sources in an image.
 
-        The results are saved in :attr:`stamps` and :attr:`results`.
-
         Parameters
         ----------
         D : array
@@ -61,7 +59,7 @@ class GuideCameraAnalysis(object):
             When None, this array will be estimated from D.
         meta : dict
             Metadata associated with this input image. Will be propagated to the results
-            with NSRC and STAMPSIZE appended.
+            with NSRC and SSIZE appended.
         nsrc : int
             Number of candiate PSF sources to detect, in (roughly) decreasing order of SNR.
         chisq_max : float
@@ -73,11 +71,16 @@ class GuideCameraAnalysis(object):
         cdist_max : float
             Maximum distance of the image centroid from the stamp center.
             Used to reject the wings of bright stars.
+
+        Returns
+        -------
+        :class:`GuideCameraResults`
+            Object containing the stamps, fit results and metadata for this detection.
         """
         D, W = desietcimg.util.prepare(D, W)
         meta = dict(meta)
         meta['NSRC'] = nsrc
-        meta['STAMPSIZE'] = self.stamp_size
+        meta['SSIZE'] = self.stamp_size
         # Mask the most obvious defects in the whole image with a very loose chisq cut.
         W, nmasked = desietcimg.util.mask_defects(D, W, 1e4, inplace=True)
         ny, nx = D.shape
@@ -166,11 +169,11 @@ class GuideCameraAnalysis(object):
                 continue
 
             # Fit a single Gaussian + constant background to this stamp.
-            fitresults = self.fitter.fit(stamp, ivar)
+            result = self.fitter.fit(stamp, ivar)
 
             # Save this candidate PSF-like source.
             stamps.append((stamp, ivar))
-            results.append((fitresults, slice(ylo, yhi), slice(xlo, xhi)))
+            results.append((result, slice(ylo, yhi), slice(xlo, xhi)))
 
         return GuideCameraResults(stamps, results, meta)
 
@@ -195,18 +198,34 @@ class GuideCameraResults(object):
         """
         if not overwrite and os.path.exists(name):
             raise RuntimeError('File exists and overwrite is False: {0}.'.format(name))
-        hdus = fitsio.FITS(name, 'rw')
-        # Write a dummy primary HDU.
-        nstamps = len(self.stamps)
-        hdus.write(np.zeros((1,)), header=self.meta)
-        # Write each stamp.
-        for k in range(nstamps):
-            fit, x_slice, y_slice = self.results[k]
-            hdr = dict(
-                x1=x_slice.start, x2=x_slice.stop, y1=y_slice.start, y2=y_slice.stop,
-                success=fit.success, message=fit.message, status=fit.status)
-            if fit.success:
-                for pname, pvalue in fit.p.items():
-                    hdr[pname] = pvalue
-            hdus.write(np.stack(self.stamps[k]), header=hdr, extname='SRC{0}'.format(k))
-        hdus.close()
+        with fitsio.FITS(name, 'rw', clobber=overwrite) as hdus:
+            # Write a primary HDU with only the metadata.
+            hdus.write(np.zeros((1,), dtype=np.float32), header=self.meta)
+            # Write each stamp.
+            for k in range(self.meta['NSRC']):
+                result, y_slice, x_slice = self.results[k]
+                hdr = dict(X1=x_slice.start, X2=x_slice.stop, Y1=y_slice.start, Y2=y_slice.stop)
+                for key, val in result.items():
+                    hdr[key.upper() + '_'] = val
+                hdus.write(np.stack(self.stamps[k]), header=hdr, extname='SRC{0}'.format(k))
+
+    @staticmethod
+    def load(name):
+        """Restore results previously written by :meth:`save`.
+        """
+        with fitsio.FITS(name, 'r') as hdus:
+            stamps, results = [], []
+            meta = dict(hdus[0].read_header())
+            for k in range(meta['NSRC']):
+                extname = 'SRC{0}'.format(k)
+                hdr = dict(hdus[extname].read_header())
+                x_slice = slice(hdr['X1'], hdr['X2'])
+                y_slice = slice(hdr['Y1'], hdr['Y2'])
+                result = {}
+                for key, val in hdr.items():
+                    if key.endswith('_'):
+                        result[key[:-1].lower()] = val
+                results.append((result, y_slice, x_slice))
+                data = hdus[extname].read()
+                stamps.append((data[0].copy(), data[1].copy()))
+        return GuideCameraResults(stamps, results, meta)
