@@ -1,4 +1,5 @@
 import functools
+import os.path
 
 import numpy as np
 
@@ -59,11 +60,10 @@ class GuideCameraAnalysis(object):
             2D array of correponsding inverse-variance weights with shape (ny, nx).
             When None, this array will be estimated from D.
         meta : dict
-            Metadata associated with this input image. Will be propagated to the FITS
-            file written by :meth:`save`.
+            Metadata associated with this input image. Will be propagated to the results
+            with NSRC and STAMPSIZE appended.
         nsrc : int
             Number of candiate PSF sources to detect, in (roughly) decreasing order of SNR.
-            Appended to the metadata with key NSRC.
         chisq_max : float
             Cut on chisq value passed to :func:`desietcimg.util.mask_defects` for
             each candidate stamp.  Used to reject fakes due to hot pixels or cosmics.
@@ -75,8 +75,9 @@ class GuideCameraAnalysis(object):
             Used to reject the wings of bright stars.
         """
         D, W = desietcimg.util.prepare(D, W)
-        self.meta = dict(meta)
-        self.meta['NSRC'] = nsrc
+        meta = dict(meta)
+        meta['NSRC'] = nsrc
+        meta['STAMPSIZE'] = self.stamp_size
         # Mask the most obvious defects in the whole image with a very loose chisq cut.
         W, nmasked = desietcimg.util.mask_defects(D, W, 1e4, inplace=True)
         ny, nx = D.shape
@@ -93,8 +94,8 @@ class GuideCameraAnalysis(object):
         filtered = np.divide(WDf, Wf, out=np.zeros_like(W), where=Wf > 0)
         inset = filtered[h:-h, h:-h]
         fmin = np.min(filtered)
-        self.stamps, self.results = [], []
-        while len(self.stamps) < nsrc:
+        stamps, results = [], []
+        while len(stamps) < nsrc:
             # Find the largest filtered value in the inset region and its indices [iy, ix].
             iy, ix = np.unravel_index(np.argmax(inset), (ny - 2 * h, nx - 2 * h))
             fmax = inset[iy, ix]
@@ -168,11 +169,22 @@ class GuideCameraAnalysis(object):
             fitresults = self.fitter.fit(stamp, ivar)
 
             # Save this candidate PSF-like source.
-            self.stamps.append((stamp, ivar))
-            self.results.append((fitresults, slice(ylo, yhi), slice(xlo, xhi)))
+            stamps.append((stamp, ivar))
+            results.append((fitresults, slice(ylo, yhi), slice(xlo, xhi)))
+
+        return GuideCameraResults(stamps, results, meta)
+
+
+class GuideCameraResults(object):
+    """Container for guide camera analysis results.
+    """
+    def __init__(self, stamps, results, meta):
+        self.stamps = stamps
+        self.results = results
+        self.meta = meta
 
     def save(self, name, overwrite=True):
-        """Save the results of the most recent analysis to a FITS file.
+        """Save results to a FITS file.
 
         Parameters
         ----------
@@ -181,8 +193,6 @@ class GuideCameraAnalysis(object):
         overwrite : bool
             OK to silently overwrite any existing file when True.
         """
-        if self.stamps is None or self.results is None:
-            raise RuntimeError('Must detect sources before saving.')
         if not overwrite and os.path.exists(name):
             raise RuntimeError('File exists and overwrite is False: {0}.'.format(name))
         hdus = fitsio.FITS(name, 'rw')

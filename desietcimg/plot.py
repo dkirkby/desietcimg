@@ -90,18 +90,19 @@ def plot_sky_camera(SCA, size=4, pad=0.02, labels=True, params=True):
     return A
 
 
-def plot_guide_camera(GCA, size=4, pad=0.02, ellipses=True, params=True):
-    if GCA.stamps is None or GCA.results is None:
+def plot_guide_results(GCR, size=4, pad=0.02, ellipses=True, params=True):
+    if GCR.stamps is None or GCR.results is None:
         raise RuntimeError('No results available to plot.')
-    nstamps = len(GCA.stamps)
+    nstamps = GCR.meta['NSRC']
+    rsize = GCR.meta['STAMPSIZE'] // 2
     A = Axes(nstamps, size, pad)
     for k in range(nstamps):
         ax = A.axes[k]
-        plot_image(*GCA.stamps[k], ax=ax)
+        plot_image(*GCR.stamps[k], ax=ax)
         kwargs = dict(verticalalignment='center', horizontalalignment='center',
                       transform=ax.transAxes, color='w', fontweight='bold')
-        fit, x_slice, y_slice = GCA.results[k]
-        ix, iy = x_slice.start + GCA.rsize, y_slice.start + GCA.rsize
+        fit, x_slice, y_slice = GCR.results[k]
+        ix, iy = x_slice.start + rsize, y_slice.start + rsize
         label = 'x={0:04d} y={1:04d}'.format(ix, iy)
         ax.text(0.5, 0.05, label, fontsize=16, **kwargs)
         if fit.success:
