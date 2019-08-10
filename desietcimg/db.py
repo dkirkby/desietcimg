@@ -62,7 +62,7 @@ class Exposures(object):
         if what is not None and what not in self.columns:
             raise ValueError(f'Invalid column name: "{what}".')
         if expid not in self.cache:
-            row = db.select('exposure.exposure', self.what, where=f'id={expid}', limit=1)
+            row = self.db.select('exposure.exposure', self.what, where=f'id={expid}', limit=1)
             # Cache the results.
             self.cache[expid] = row.values[0]
             # Trim the cache if necessary.
