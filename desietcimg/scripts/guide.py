@@ -25,7 +25,7 @@ def get_pm_path(expid, night=None, dbname='db.yaml', root=Path('/project/project
     if night is None:
         if db is None:
             # Initialize the exposure db.
-            db = DB(args.db)
+            db = DB(dbname)
             ExpInfo = Exposures(db)
         # Lookup the night for this sequence number.
         night = ExpInfo(expid, 'night')
