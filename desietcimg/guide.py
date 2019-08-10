@@ -40,11 +40,13 @@ class GuideCameraAnalysis(object):
         self.xgrid, self.ygrid = np.meshgrid(dxy, dxy, sparse=False)
         # Initialize fitter.
         self.fitter = desietcimg.fit.GaussFitter(stamp_size)
+        self.stamps = None
+        self.results = None
 
     def detect_sources(self, D, W=None, nsrc=12, chisq_max=150., min_central=18, cdist_max=3.):
         """Detect PSF-like sources in an image.
 
-        The results are saved in :attr:`stamps` and :attr:`params`.
+        The results are saved in :attr:`stamps` and :attr:`results`.
 
         Parameters
         ----------
@@ -82,11 +84,8 @@ class GuideCameraAnalysis(object):
         filtered = np.divide(WDf, Wf, out=np.zeros_like(W), where=Wf > 0)
         inset = filtered[h:-h, h:-h]
         fmin = np.min(filtered)
-        stamps, params = [], []
-        AX = desietcimg.plot.Axes(nsrc)
-        while len(stamps) < nsrc:
-            ax = AX.axes[len(stamps)]
-
+        self.stamps, self.results = [], []
+        while len(self.stamps) < nsrc:
             # Find the largest filtered value in the inset region and its indices [iy, ix].
             iy, ix = np.unravel_index(np.argmax(inset), (ny - 2 * h, nx - 2 * h))
             fmax = inset[iy, ix]
@@ -156,20 +155,9 @@ class GuideCameraAnalysis(object):
             if cdist > cdist_max:
                 continue
 
-            desietcimg.plot.plot_image(stamp, ivar, ax=ax)
-
             # Fit a single Gaussian + constant background to this stamp.
-            results = self.fitter.fit(stamp, ivar)
+            fitresults = self.fitter.fit(stamp, ivar)
 
-            if results.success: # or results.status == 2:
-                ls = '-' if results.success else ':'
-                desietcimg.plot.draw_ellipse(
-                    ax, results.p['x0'], results.p['y0'], results.p['s'], results.p['g1'], results.p['g2'], ls=ls)
-                label = f'$\\nu$ {results.snr:.1f} s {results.p["s"]:.1f} g {results.p["gmag"]:.2f}'
-                ax.text(0.5, 0.95, label, horizontalalignment='center', verticalalignment='center',
-                        fontsize=22, fontweight='bold', color='w', transform=ax.transAxes)
-
-            stamps.append((stamp, ivar))
-            params.append((results, slice(ylo, yhi), slice(xlo, xhi)))
-        self.stamps = stamps
-        self.params = params
+            # Save this candidate PSF-like source.
+            self.stamps.append((stamp, ivar))
+            self.results.append((fitresults, slice(ylo, yhi), slice(xlo, xhi)))

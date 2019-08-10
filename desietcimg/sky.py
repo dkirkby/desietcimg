@@ -77,6 +77,7 @@ class SkyCameraAnalysis(object):
         self.fiber_area = np.pi * (0.5 * self.fiberdiam / binning) ** 2
         # We do not have any fiber location info yet.
         self.fibers = None
+        self.results = None
 
     def validate(self, data):
         """

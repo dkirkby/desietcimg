@@ -3,6 +3,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches
+import matplotlib.cm
 
 
 def draw_ellipse(ax, x0, y0, s, g1, g2, nsigmas=1, **ellipseopts):
@@ -20,7 +21,7 @@ def draw_ellipse(ax, x0, y0, s, g1, g2, nsigmas=1, **ellipseopts):
     ax.add_artist(ellipse)
 
 
-def plot_image(D, W=None, ax=None, cmap='viridis', masked_color='pink'):
+def plot_image(D, W=None, ax=None, cmap='viridis', masked_color='chocolate'):
     if W is not None and np.any(W == 0):
         D = D.copy()
         D[W == 0] = np.nan
@@ -87,3 +88,26 @@ def plot_sky_camera(SCA, size=4, pad=0.02, labels=True, params=True):
             params = '{0:.1f} ADU SNR {1:.1f}'.format(fiber_flux, snr)
             ax.text(0.5, 0.05, params, fontsize=14, **kwargs)
     return A
+
+
+def plot_guide_camera(GCA, size=4, pad=0.02, ellipses=True, params=True):
+    if GCA.stamps is None or GCA.results is None:
+        raise RuntimeError('No results available to plot.')
+    nstamps = len(GCA.stamps)
+    A = Axes(nstamps, size, pad)
+    for k in range(nstamps):
+        ax = A.axes[k]
+        plot_image(*GCA.stamps[k], ax=ax)
+        kwargs = dict(verticalalignment='center', horizontalalignment='center',
+                      transform=ax.transAxes, color='w', fontweight='bold')
+        fit, x_slice, y_slice = GCA.results[k]
+        ix, iy = x_slice.start + GCA.rsize, y_slice.start + GCA.rsize
+        label = 'x={0:04d} y={1:04d}'.format(ix, iy)
+        ax.text(0.5, 0.05, label, fontsize=16, **kwargs)
+        if fit.success:
+            if ellipses:
+                draw_ellipse(ax, fit.p['x0'], fit.p['y0'],
+                    fit.p['s'], fit.p['g1'], fit.p['g2'])
+            if params:
+                label = f'$\\nu$ {fit.snr:.1f} s {fit.p["s"]:.1f} g {fit.p["gmag"]:.2f}'
+                ax.text(0.5, 0.95, label, fontsize=18, **kwargs)
