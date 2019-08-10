@@ -17,6 +17,24 @@ from desietcimg.plot import *
 from desietcimg.db import *
 
 
+db = None
+ExpInfo = None
+
+def get_pm_path(expid, night=None, root=Path('/project/projectdirs/desi/spectro/data/')):
+    if night is None:
+        if db is None:
+            # Initialize the exposure db.
+            db = DB(args.db)
+            ExpInfo = Exposures(db)
+        # Lookup the night for this sequence number.
+        night = ExpInfo(expid, 'night')
+    tag = '{0:08d}'.format(expid)
+    path = root / str(night) / tag / 'guide-{0}.fits.fz'.format(tag)
+    if not path.exists():
+        raise FileNotFoundError(path)
+    return str(path)
+
+
 def ciproc():
     parser = argparse.ArgumentParser(
         description='Analyze CI data.',
@@ -27,29 +45,49 @@ def ciproc():
         help='stamp size to use for analysis, must be odd')
     parser.add_argument('--nsrc', type=int, default=12,
         help='number of candiate PSF sources to detect')
+    parser.add_argument('--outpath', type=str, default='.',
+        help='path where output files are saved')
     parser.add_argument('--db', type=str, default='db.yaml',
         help='yaml file of database connection parameters')
     parser.add_argument('input', nargs='+', type=str,
-        help='FITS file, sequence number, or file containing a list of sequence numbers')
+        help='FITS file, expid, or .dat file containing a list of expids')
     args = parser.parse_args()
 
     GCA = GuideCameraAnalysis(stamp_size=args.stamp_size)
-    ExpInfo = None
 
     warnings.simplefilter(action='ignore', category=FutureWarning)
 
+    outpath = Path(args.outpath)
+
+    # Build the list of files to process from the input arguments.
+    files = []
     for input in args.input:
         try:
-            seqnum = int(input)
-            print('seqnum', seqnum)
+            expid = int(input)
+            files.append(get_pm_path(expid))
             continue
         except ValueError:
             pass
         if not os.path.exists(input):
             print('No such file: {0}.'.format(input))
             continue
-        with fitsio.FITS(input, 'r') as hdus:
+        if input.endswith('.dat'):
+            # Read a list of sequence numbers to process.
+            with open(input, 'r') as f:
+                for line in f.readlines():
+                    expid = int(line.strip())
+                    files.append(get_pm_path(expid))
+            continues
+        elif input.endswith('.fits') or input.endswith('.fits.fz'):
+            files.append(input)
+
+    # Loop over files.
+    for file in files:
+        with fitsio.FITS(file, 'r') as hdus:
             meta = hdus[0].read_header()
+            night = str(meta['NIGHT'])
+            expid = '{0:08d}'.format(meta['EXPID'])
+            print('Processing {0} from {1}...'.format(expid, night))
             for camera in 'CIN', 'CIE', 'CIS', 'CIW', 'CIC':
                 if camera in hdus:
                     D = hdus[camera][0, :, :][0]
@@ -57,6 +95,7 @@ def ciproc():
                     if args.verbose:
                         print('== {0}:'.format(camera))
                         GCR.print()
-
-    #db = DB(args.db)
-    #ExpInfo = Exposures(db)
+                    path = outpath / night / expid
+                    path.mkdir(parents=True, exist_ok=True)
+                    output = path / 'GCR-{0}-{1}.fits'.format(expid, camera)
+                    GCR.save(str(output))
