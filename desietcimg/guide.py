@@ -186,6 +186,18 @@ class GuideCameraResults(object):
         self.results = results
         self.meta = meta
 
+    def print(self):
+        rsize = self.meta['SSIZE'] // 2
+        for k in range(self.meta['NSRC']):
+            result, y_slice, x_slice = self.results[k]
+            print('SRC{0} [x={1}, y={2}]'.format(
+                k, x_slice.start + rsize, y_slice.start + rsize))
+            if result['success']:
+                print('  SNR={0:.1f}'.format(result['snr']), end='')
+                for pname in desietcimg.fit.GaussFitter.pnames:
+                    print(', {0}={1:.3f}'.format(pname, result[pname]), end='')
+                print()
+
     def save(self, name, overwrite=True):
         """Save results to a FITS file.
 
