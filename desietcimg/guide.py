@@ -2,6 +2,8 @@ import functools
 
 import numpy as np
 
+import fitsio
+
 import desietcimg.util
 import desietcimg.fit
 
@@ -43,7 +45,8 @@ class GuideCameraAnalysis(object):
         self.stamps = None
         self.results = None
 
-    def detect_sources(self, D, W=None, nsrc=12, chisq_max=150., min_central=18, cdist_max=3.):
+    def detect_sources(self, D, W=None, meta={},
+                       nsrc=12, chisq_max=150., min_central=18, cdist_max=3.):
         """Detect PSF-like sources in an image.
 
         The results are saved in :attr:`stamps` and :attr:`results`.
@@ -55,8 +58,12 @@ class GuideCameraAnalysis(object):
         W : array or None
             2D array of correponsding inverse-variance weights with shape (ny, nx).
             When None, this array will be estimated from D.
+        meta : dict
+            Metadata associated with this input image. Will be propagated to the FITS
+            file written by :meth:`save`.
         nsrc : int
             Number of candiate PSF sources to detect, in (roughly) decreasing order of SNR.
+            Appended to the metadata with key NSRC.
         chisq_max : float
             Cut on chisq value passed to :func:`desietcimg.util.mask_defects` for
             each candidate stamp.  Used to reject fakes due to hot pixels or cosmics.
@@ -68,6 +75,8 @@ class GuideCameraAnalysis(object):
             Used to reject the wings of bright stars.
         """
         D, W = desietcimg.util.prepare(D, W)
+        self.meta = dict(meta)
+        self.meta['NSRC'] = nsrc
         # Mask the most obvious defects in the whole image with a very loose chisq cut.
         W, nmasked = desietcimg.util.mask_defects(D, W, 1e4, inplace=True)
         ny, nx = D.shape
@@ -161,3 +170,33 @@ class GuideCameraAnalysis(object):
             # Save this candidate PSF-like source.
             self.stamps.append((stamp, ivar))
             self.results.append((fitresults, slice(ylo, yhi), slice(xlo, xhi)))
+
+    def save(self, name, overwrite=True):
+        """Save the results of the most recent analysis to a FITS file.
+
+        Parameters
+        ----------
+        name : str
+            Name of the FITS file to write.
+        overwrite : bool
+            OK to silently overwrite any existing file when True.
+        """
+        if self.stamps is None or self.results is None:
+            raise RuntimeError('Must detect sources before saving.')
+        if not overwrite and os.path.exists(name):
+            raise RuntimeError('File exists and overwrite is False: {0}.'.format(name))
+        hdus = fitsio.FITS(name, 'rw')
+        # Write a dummy primary HDU.
+        nstamps = len(self.stamps)
+        hdus.write(np.zeros((1,)), header=self.meta)
+        # Write each stamp.
+        for k in range(nstamps):
+            fit, x_slice, y_slice = self.results[k]
+            hdr = dict(
+                x1=x_slice.start, x2=x_slice.stop, y1=y_slice.start, y2=y_slice.stop,
+                success=fit.success, message=fit.message, status=fit.status)
+            if fit.success:
+                for pname, pvalue in fit.p.items():
+                    hdr[pname] = pvalue
+            hdus.write(np.stack(self.stamps[k]), header=hdr, extname='SRC{0}'.format(k))
+        hdus.close()
