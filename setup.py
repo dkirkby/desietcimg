@@ -14,7 +14,8 @@ setup(
     zip_safe=False,
     entry_points = {
         'console_scripts': [
-            'simskycam=desietcimg.scripts.sky:simulate'
+            'simskycam=desietcimg.scripts.sky:simulate',
+            'ciproc=desietcimg.scripts.guide:ciproc',
         ],
     }
 )
