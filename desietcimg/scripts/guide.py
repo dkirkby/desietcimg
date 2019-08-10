@@ -78,7 +78,7 @@ def ciproc():
                 for line in f.readlines():
                     expid = int(line.strip())
                     files.append(get_pm_path(expid, dbname=args.db))
-            continues
+            continue
         elif input.endswith('.fits') or input.endswith('.fits.fz'):
             files.append(input)
 
