@@ -21,6 +21,7 @@ db = None
 ExpInfo = None
 
 def get_pm_path(expid, night=None, root=Path('/project/projectdirs/desi/spectro/data/')):
+    global db, ExpInfo
     if night is None:
         if db is None:
             # Initialize the exposure db.
