@@ -31,6 +31,7 @@ class DB(object):
             if not os.path.exists(config_name):
                 raise RuntimeError('Missing db config file: {0}.'.format(config_name))
             db_config = yaml.safe_load(config_name)
+            print(db_config)
         self.conn = psycopg2.connect(**db_config)
     def query(self, sql, dates=None):
         return pd.read_sql(sql, self.conn, parse_dates=dates)
