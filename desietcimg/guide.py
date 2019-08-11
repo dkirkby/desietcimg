@@ -46,8 +46,8 @@ class GuideCameraAnalysis(object):
         self.stamps = None
         self.results = None
 
-    def detect_sources(self, D, W=None, meta={},
-                       nsrc=12, chisq_max=150., min_central=18, cdist_max=3.):
+    def detect_sources(self, D, W=None, meta={}, nsrc=12,
+        chisq_max=150., min_central=18, cdist_max=3., saturation=(15 << 12)):
         """Detect PSF-like sources in an image.
 
         Parameters
@@ -71,13 +71,15 @@ class GuideCameraAnalysis(object):
         cdist_max : float
             Maximum distance of the image centroid from the stamp center.
             Used to reject the wings of bright stars.
+        saturation : int
+            Raw pixel values >= this level are considered saturated.
 
         Returns
         -------
         :class:`GuideCameraResults`
             Object containing the stamps, fit results and metadata for this detection.
         """
-        D, W = desietcimg.util.prepare(D, W)
+        D, W = desietcimg.util.prepare(D, W, saturation=saturation)
         meta = dict(meta)
         meta['NSRC'] = nsrc
         meta['SSIZE'] = self.stamp_size

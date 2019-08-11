@@ -142,7 +142,7 @@ class Convolutions(object):
         return conv_slice
 
 
-def prepare(D, W=None, invgain=1.6, smoothing=3, verbose=False):
+def prepare(D, W=None, invgain=1.6, smoothing=3, saturation=None, verbose=False):
     """Prepare image data for analysis.
     
     The input data D is converted to float32, if necessary, and an
@@ -166,17 +166,22 @@ def prepare(D, W=None, invgain=1.6, smoothing=3, verbose=False):
     smoothing : int
         Number of pixels for median filtering of D used to estimate
         the signal variance contribution. Must be odd.
+    saturation : int or None
+        Pixel values >= this level are considered saturated. Use the
+        maximum value for D.dtype when None.
 
     Returns
     -------
     tuple
         Tuple D, W of 2D numpy float32 arrays.
     """
+    # Default saturation level is the maximum value for this datatype.
+    if saturation is None:
+        saturation = np.iinfo(D.dtype).max
     # Find any saturated pixels.
-    maxval = np.iinfo(D.dtype).max
-    saturated = (D == maxval)
+    saturated = (D >= saturation)
     if verbose:
-        print(f'Found {np.count_nonzero(saturated)} saturated pixels.')
+        print('Found {np.count_nonzero(saturated)} pixels saturated (>={0}).'.format(saturation))
     # Convert to a float32 array.
     D = np.asarray(D, np.float32)
     # Select background pixels using sigma clipping.
