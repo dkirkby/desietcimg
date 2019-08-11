@@ -211,7 +211,7 @@ def prepare(D, W=None, invgain=1.6, smoothing=3, saturation=None, verbose=False)
     return D, W
 
 
-def mask_defects(D, W, chisq_max=5e3, kernel_size=3, min_neighbors=5, inplace=False):
+def mask_defects(D, W, chisq_max=5e3, kernel_size=3, min_neighbors=7, inplace=False):
     if not inplace:
         W = W.copy()
     # Initialize the kernel.
