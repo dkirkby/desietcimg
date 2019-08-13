@@ -41,8 +41,10 @@ class GuideCameraAnalysis(object):
         # Define pixel coordinate grids for moment calculations.
         dxy = np.arange(stamp_size) - 0.5 * (stamp_size - 1)
         self.xgrid, self.ygrid = np.meshgrid(dxy, dxy, sparse=False)
-        # Initialize fitter.
+        # Initialize primary fitter.
         self.fitter = desietcimg.fit.GaussFitter(stamp_size)
+        # Initialize slower secondary fitter.
+        self.fitter2 = desietcimg.fit.GaussFitter(stamp_size, optimize_args=dict(method='Nelder-Mead'))
         self.stamps = None
         self.results = None
 
@@ -180,6 +182,8 @@ class GuideCameraAnalysis(object):
 
             # Fit a single Gaussian + constant background to this stamp.
             result = self.fitter.fit(stamp, ivar)
+            if not result['success']:
+                result = self.fitter2.fit(stamp, ivar)
 
             # Save this candidate PSF-like source.
             stamps.append((stamp, ivar))
