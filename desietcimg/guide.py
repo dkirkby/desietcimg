@@ -43,13 +43,14 @@ class GuideCameraAnalysis(object):
         self.xgrid, self.ygrid = np.meshgrid(dxy, dxy, sparse=False)
         # Initialize primary fitter.
         self.fitter = desietcimg.fit.GaussFitter(stamp_size)
-        # Initialize slower secondary fitter.
-        self.fitter2 = desietcimg.fit.GaussFitter(stamp_size, optimize_args=dict(method='Nelder-Mead'))
+        # Initialize a slower secondary fitter for when the primary fitter fails to converge.
+        self.fitter2 = desietcimg.fit.GaussFitter(stamp_size, optimize_args=dict(
+            method='Nelder-Mead', options=dict(maxiter=100000, xatol=5e-4, fatol=5e-4, disp=False)))
         self.stamps = None
         self.results = None
 
     def detect_sources(self, D, W=None, meta={}, nsrc=12,
-        chisq_max=150., min_central=18, cdist_max=3., saturation=61000):
+        chisq_max=150., min_central=18, cdist_max=3., saturation=61000, verbose=False):
         """Detect PSF-like sources in an image.
 
         Parameters
@@ -82,11 +83,15 @@ class GuideCameraAnalysis(object):
             Object containing the stamps, fit results and metadata for this detection.
         """
         D, W = desietcimg.util.prepare(D, W, saturation=saturation)
+        if verbose:
+            print('Input image has {0} masked pixels.'.format(np.count_nonzero(W == 0)))
         meta = dict(meta)
         meta['NSRC'] = nsrc
         meta['SSIZE'] = self.stamp_size
         # Mask the most obvious defects in the whole image with a very loose chisq cut.
         W, nmasked = desietcimg.util.mask_defects(D, W, chisq_max=1e4, min_neighbors=7, inplace=True)
+        if verbose:
+            print('Masked {0} defect pixels in full image.'.format(nmasked))
         ny, nx = D.shape
         h = self.rsize
         ss = self.stamp_size
@@ -126,26 +131,41 @@ class GuideCameraAnalysis(object):
             f2nd = np.max(inset)
             filtered[ylo:yhi, xlo:xhi] = save
 
+            if verbose:
+                print('Candidate at ({0},{1}) with fmax={2:.1f} f2nd={3:.1f}'
+                      .format(xlo + h, ylo + h, fmax, f2nd))
+
             # Mask pixel defects in this stamp.
             ivar, nmasked = desietcimg.util.mask_defects(
                 stamp, ivar, chisq_max=chisq_max, min_neighbors=5, inplace=True)
+            if verbose:
+                print('  Masked {0} pixels within stamp.'.format(nmasked))
             
             # Update the WD and W convolutions with the new ivar.
             CWD.set_source(slice(ylo, yhi), slice(xlo, xhi), stamp * ivar)
             changed = CW.set_source(slice(ylo, yhi), slice(xlo, xhi), ivar)
             # Calculate the updated filtered array.
             filtered[changed] = 0
+            if verbose:
+                print('  WDf: min={0:.1f} max={1:.1f} nan? {2}'.format(
+                    np.min(WDf[changed]), np.max(WDf[changed]), np.any(np.isnan(WDf[changed]))))
+                print('  Wf: min={0:.1f} max={1:.1f} nan? {2}'.format(
+                    np.min(Wf[changed]), np.max(Wf[changed]), np.any(np.isnan(Wf[changed]))))
             filtered[changed] = np.divide(
                 WDf[changed], Wf[changed], out=filtered[changed], where=Wf[changed] > 0)
 
             # Calculate the change in the filtered value after the masking.
             # We can assume that the denominator is non-zero here.
-            fnew = np.sum(stamp * ivar * self.PSF0) / np.sum(ivar * self.PSF0)
-
+            wsum = np.sum(ivar * self.PSF0)
+            fnew = 0
+            if wsum > 0:
+                fnew = np.sum(stamp * ivar * self.PSF0) / wsum
             if fnew < f2nd:
                 # This stamp had a artificially high filtered value due to pixel
                 # defects so skip it now.  It might still come back at a lower
                 # value after masking.
+                if verbose:
+                    print('  Skipped with fnew={0:.1f} < f2nd={1:.1f}'.format(fnew, f2nd))
                 continue
 
             # Redo the filtering with the data in this stamp set to zero
@@ -162,6 +182,7 @@ class GuideCameraAnalysis(object):
             if ncentral < min_central:
                 # This stamp has too many masked pixels in the central core to
                 # useful. This is necessary to reject saturated stars.
+                print('  Dropped with ncentral={0} < {1}.'.format(ncentral, min_central))
                 continue
 
             # Stamps are sometimes selected on the wings of a previously selected
@@ -178,13 +199,18 @@ class GuideCameraAnalysis(object):
             # Ignore stamps whose centroid is not centered, which probably indicates
             # we have found the wing of a previously found bright star.
             if cdist > cdist_max:
+                print('  Dropped with cdist={0:.2f} > {1:.2f}.'.format(cdist, cdist_max))
                 continue
 
             # Fit a single Gaussian + constant background to this stamp.
             result = self.fitter.fit(stamp, ivar)
+            if verbose:
+                print('  Fit: {0}'.format(result['message']))
             if not result['success']:
                 result = self.fitter2.fit(stamp, ivar)
-
+                if verbose:
+                    print('  2nd Fit: {0}'.format(result['message']))
+    
             # Save this candidate PSF-like source.
             stamps.append((stamp, ivar))
             results.append((result, slice(ylo, yhi), slice(xlo, xhi)))
