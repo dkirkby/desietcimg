@@ -148,7 +148,7 @@ class GuideCameraAnalysis(object):
             filtered[iy, ix] = 0
             filtered[changed] = 0
             if verbose:
-                print('  nchanged {0}'.np.count_nonzero(changed))
+                print('  nchanged {0}'.format(np.count_nonzero(changed)))
                 print('  WDf: min={0:.1f} max={1:.1f} nan? {2}'.format(
                     np.min(WDf[changed]), np.max(WDf[changed]), np.any(np.isnan(WDf[changed]))))
                 print('  Wf: min={0:.1f} max={1:.1f} nan? {2}'.format(
