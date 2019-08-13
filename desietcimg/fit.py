@@ -45,6 +45,7 @@ class GaussFitter(object):
         self.bgmask[:, -bgmargin:] = True
         self.sigmask = ~self.bgmask
         self.nsigmask = np.count_nonzero(self.sigmask)
+        self.trace = False
 
     # Name each of our (transformed) parameters.
     pnames = ('b', 'f', 'x0', 'y0', 's', 'g1', 'g2')
@@ -54,9 +55,9 @@ class GaussFitter(object):
         """Undo the non-linear transforms that implement our parameter constraints:
         s > 0, f > 0, g1 ** 2 + g2 ** 2 < 1
         """
-        b, logf, x0, y0, logs, G1, G2 = theta
+        b, logfr, x0, y0, logs, G1, G2 = theta
         s = np.exp(logs)
-        f = np.exp(logf)
+        f = self.f0 * np.exp(logfr)
         Gscale = np.sqrt(1 + G1 ** 2 + G2 ** 2)
         g1 = G1 / Gscale
         g2 = G2 / Gscale
@@ -85,16 +86,23 @@ class GaussFitter(object):
         r0sq = x0 ** 2 + y0 ** 2
         gsq = g1 ** 2 + g2 ** 2
         return 0.5 * r0sq / self.r0sig ** 2  + 0.5 * gsq / self.gsig ** 2
-    
+
     def nlpost(self, theta, D, W):
         """Evaluate -log P(theta | D, W)
         """
         params = self.transform(theta)
         Dpred = self.predict(*params)
         nllike = 0.5 * np.sum(W * (D - Dpred) ** 2)
-        return nllike + self.nlprior(*params)
-    
-    def fit(self, D, W, s0=5):
+        result = nllike + self.nlprior(*params)
+        if self.trace:
+            print('[{0}]'.format(self.ncall), end='')
+            for pname, pvalue in zip(self.pnames, params):
+                print(' {0}={1:.3f}'.format(pname, pvalue), end='')
+            print(' -> {0}'.format(result))
+            self.ncall += 1
+        return result
+
+    def fit(self, D, W, s0=5, verbose=False, trace=False):
         """Fit an image D with inverse variance weights W.
         
         Parameters
@@ -123,10 +131,15 @@ class GaussFitter(object):
         Wsum = np.sum(W * self.sigmask)
         WDsum = np.sum(W * (D - bg) * self.sigmask)
         sig = WDsum / Wsum * self.nsigmask if (WDsum > 0 and Wsum > 0) else 1
+        if verbose:
+            print('Estimated: b={0:.2f} adu/pix s={1:.1f} adu'.format(bg, sig))
         # Build the vector of initial parameter values.
-        self.theta0 = np.array([bg, np.log(sig), 0., 0., np.log(s0), 0., 0.])
+        self.f0 = sig
+        self.theta0 = np.array([bg, 0., 0., 0., np.log(s0), 0., 0.])
         # Run the optimizer and return the result.
         try:
+            self.ncall = 0
+            self.trace = trace
             # Silently ignore any warnings.
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
