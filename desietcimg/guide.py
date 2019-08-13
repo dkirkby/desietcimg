@@ -145,7 +145,6 @@ class GuideCameraAnalysis(object):
             CWD.set_source(slice(ylo, yhi), slice(xlo, xhi), stamp * ivar)
             changed = CW.set_source(slice(ylo, yhi), slice(xlo, xhi), ivar)
             # Calculate the updated filtered array.
-            filtered[iy, ix] = 0
             filtered[changed] = 0
             if verbose:
                 print('  nchanged {0}'.format(np.count_nonzero(changed)))
@@ -155,6 +154,9 @@ class GuideCameraAnalysis(object):
                     np.min(Wf[changed]), np.max(Wf[changed]), np.any(np.isnan(Wf[changed]))))
             filtered[changed] = np.divide(
                 WDf[changed], Wf[changed], out=filtered[changed], where=Wf[changed] > 0)
+            # This shouldn't be necessary but prevents 13047-CIW from getting into a loop
+            # where filtered[iy, ix] is not changed by anything above.
+            filtered[iy, ix] = 0
 
             # Calculate the change in the filtered value after the masking.
             # We can assume that the denominator is non-zero here.
