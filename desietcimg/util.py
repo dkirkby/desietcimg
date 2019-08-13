@@ -211,6 +211,33 @@ def prepare(D, W=None, invgain=1.6, smoothing=3, saturation=None, verbose=False)
     return D, W
 
 
+def sobelfilter(D, W):
+    """Estimate the magnitude of the 2D gradient of D.
+    
+    Uses Sobel filters in x and y modified to account for ivar weights W.
+    """
+    here, plus, minus = slice(1, -1), slice(2, None), slice(None, -2)
+    # Estimate slopes along each axis at each pixel.
+    Dx = 0.5 * (D[:, plus] - D[:, minus])
+    Dy = 0.5 * (D[plus, :] - D[minus, :])
+    #  Calculate  the corresponding inverse variances.
+    Wp, Wm = W[:, plus], W[:, minus]
+    Wx = 0.25 * np.divide(Wp * Wm, Wp + Wm, out=np.zeros_like(Wp), where=Wp + Wm > 0)
+    Wp, Wm = W[plus, :], W[minus, :]
+    Wy = 0.25 * np.divide(Wp * Wm, Wp + Wm, out=np.zeros_like(Wp), where=Wp + Wm > 0)
+    # Average slope estimates along the other axis with weights (1, 2, 1).
+    WDx = Wx[minus, :] * Dx[minus, :] + 2 * Wx[here, :] * Dx[here, :] + Wx[plus, :] * Dx[plus, :]
+    Wxsum = Wx[minus, :] + 2 * Wx[here, :] + Wx[plus, :]
+    Dx = np.divide(WDx, Wxsum, out=np.zeros_like(WDx), where=Wxsum > 0)
+    WDy = Wy[:, minus] * Dy[:, minus] + 2 * Wy[:, here] * Dy[:, here] + Wy[:, plus] * Dy[:, plus]
+    Wysum = Wy[:, minus] + 2 * Wy[:, here] + Wy[:, plus]
+    Dy = np.divide(WDy, Wysum, out=np.zeros_like(WDy), where=Wysum > 0)
+    # Estimate the 2D gradient magnitude.
+    Dg = np.zeros_like(D)
+    Dg[here, here] = np.hypot(Dx, Dy)
+    return Dg
+
+
 def mask_defects(D, W, chisq_max=5e3, kernel_size=3, min_neighbors=7, inplace=False):
     if not inplace:
         W = W.copy()
@@ -219,6 +246,7 @@ def mask_defects(D, W, chisq_max=5e3, kernel_size=3, min_neighbors=7, inplace=Fa
         raise ValueError('Kernel size must be odd.')
     kernel = np.ones((kernel_size, kernel_size), np.float32)
     nby2 = kernel_size // 2
+    max_neighbors = kernel_size ** 2 - 1
     kernel[nby2, nby2] = 0.
     # Calculate the ivar-weighted image.
     WD = np.array(W * D, np.float32)
@@ -242,8 +270,8 @@ def mask_defects(D, W, chisq_max=5e3, kernel_size=3, min_neighbors=7, inplace=Fa
         xlo, ylo = max(0, ix - nby2), max(0, iy - nby2)
         xhi, yhi = min(nx, ix + nby2 + 1), min(ny, iy + nby2 + 1)
         # Subtract 1 since chisq > 0 means that W > 0 for the central pixel.
-        nonzero = np.count_nonzero(W[ylo:yhi, xlo:xhi]) - 1
-        if nonzero < min_neighbors:
+        num_neighbors = np.count_nonzero(W[ylo:yhi, xlo:xhi]) - 1
+        if num_neighbors < min_neighbors or ((num_neighbors < max_neighbors) and (chisq[iy, ix] < 2 * chisq_max)):
             # Zero this pixel's chisq without changing its weight.
             chisq[iy, ix] = 0.
             continue

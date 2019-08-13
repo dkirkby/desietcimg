@@ -47,7 +47,7 @@ class GuideCameraAnalysis(object):
         self.results = None
 
     def detect_sources(self, D, W=None, meta={}, nsrc=12,
-        chisq_max=150., min_central=18, cdist_max=3., saturation=(15 << 12)):
+        chisq_max=150., min_central=18, cdist_max=3., saturation=61000):
         """Detect PSF-like sources in an image.
 
         Parameters
@@ -84,7 +84,7 @@ class GuideCameraAnalysis(object):
         meta['NSRC'] = nsrc
         meta['SSIZE'] = self.stamp_size
         # Mask the most obvious defects in the whole image with a very loose chisq cut.
-        W, nmasked = desietcimg.util.mask_defects(D, W, 1e4, inplace=True)
+        W, nmasked = desietcimg.util.mask_defects(D, W, chisq_max=1e4, min_neighbors=7, inplace=True)
         ny, nx = D.shape
         h = self.rsize
         ss = self.stamp_size
@@ -110,6 +110,13 @@ class GuideCameraAnalysis(object):
             xhi, yhi = ix + ss, iy + ss
             stamp = D[ylo:yhi, xlo:xhi].copy()
             ivar = W[ylo:yhi, xlo:xhi].copy()
+
+            # Cosmic-ray detection.
+            '''
+            Dgrad = desietcimg.util.sobelfilter(stamp, ivar)
+            n100 = np.count_nonzero(Dgrad > 100)
+            n10 = np.count_nonzero(Dgrad > 10)
+            '''
             
             # Find the largest filtered value outside of this stamp.
             save = filtered[ylo:yhi, xlo:xhi].copy()
@@ -118,7 +125,8 @@ class GuideCameraAnalysis(object):
             filtered[ylo:yhi, xlo:xhi] = save
 
             # Mask pixel defects in this stamp.
-            ivar, nmasked = desietcimg.util.mask_defects(stamp, ivar, chisq_max, inplace=True)
+            ivar, nmasked = desietcimg.util.mask_defects(
+                stamp, ivar, chisq_max=chisq_max, min_neighbors=5, inplace=True)
             
             # Update the WD and W convolutions with the new ivar.
             CWD.set_source(slice(ylo, yhi), slice(xlo, xhi), stamp * ivar)
@@ -151,7 +159,7 @@ class GuideCameraAnalysis(object):
             ncentral = np.sum(ivar[c_slice, c_slice] > 0)
             if ncentral < min_central:
                 # This stamp has too many masked pixels in the central core to
-                # useful. This is normal for saturated stars.
+                # useful. This is necessary to reject saturated stars.
                 continue
 
             # Stamps are sometimes selected on the wings of a previously selected
