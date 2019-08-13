@@ -154,9 +154,6 @@ class GuideCameraAnalysis(object):
                     np.min(Wf[changed]), np.max(Wf[changed]), np.any(np.isnan(Wf[changed]))))
             filtered[changed] = np.divide(
                 WDf[changed], Wf[changed], out=filtered[changed], where=Wf[changed] > 0)
-            # This shouldn't be necessary but prevents 13047-CIW from getting into a loop
-            # where filtered[iy, ix] is not changed by anything above.
-            filtered[iy, ix] = 0
 
             # Calculate the change in the filtered value after the masking.
             # We can assume that the denominator is non-zero here.
@@ -170,6 +167,9 @@ class GuideCameraAnalysis(object):
                 # value after masking.
                 if verbose:
                     print('  Skipped with fnew={0:.1f} < f2nd={1:.1f}'.format(fnew, f2nd))
+                # This shouldn't be necessary but prevents 13047-CIW from getting into a loop
+                # where filtered[iy, ix] is not changed by anything above.
+                inset[iy, ix] = 0
                 continue
 
             # Redo the filtering with the data in this stamp set to zero
