@@ -145,8 +145,10 @@ class GuideCameraAnalysis(object):
             CWD.set_source(slice(ylo, yhi), slice(xlo, xhi), stamp * ivar)
             changed = CW.set_source(slice(ylo, yhi), slice(xlo, xhi), ivar)
             # Calculate the updated filtered array.
+            filtered[iy, ix] = 0
             filtered[changed] = 0
             if verbose:
+                print('  nchanged {0}'.np.count_nonzero(changed))
                 print('  WDf: min={0:.1f} max={1:.1f} nan? {2}'.format(
                     np.min(WDf[changed]), np.max(WDf[changed]), np.any(np.isnan(WDf[changed]))))
                 print('  Wf: min={0:.1f} max={1:.1f} nan? {2}'.format(
