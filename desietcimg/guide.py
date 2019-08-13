@@ -182,7 +182,8 @@ class GuideCameraAnalysis(object):
             if ncentral < min_central:
                 # This stamp has too many masked pixels in the central core to
                 # useful. This is necessary to reject saturated stars.
-                print('  Dropped with ncentral={0} < {1}.'.format(ncentral, min_central))
+                if verbose:
+                    print('  Dropped with ncentral={0} < {1}.'.format(ncentral, min_central))
                 continue
 
             # Stamps are sometimes selected on the wings of a previously selected
@@ -199,7 +200,8 @@ class GuideCameraAnalysis(object):
             # Ignore stamps whose centroid is not centered, which probably indicates
             # we have found the wing of a previously found bright star.
             if cdist > cdist_max:
-                print('  Dropped with cdist={0:.2f} > {1:.2f}.'.format(cdist, cdist_max))
+                if verbose:
+                    print('  Dropped with cdist={0:.2f} > {1:.2f}.'.format(cdist, cdist_max))
                 continue
 
             # Fit a single Gaussian + constant background to this stamp.
