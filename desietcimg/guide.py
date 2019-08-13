@@ -45,7 +45,7 @@ class GuideCameraAnalysis(object):
         self.fitter = desietcimg.fit.GaussFitter(stamp_size)
         # Initialize a slower secondary fitter for when the primary fitter fails to converge.
         self.fitter2 = desietcimg.fit.GaussFitter(stamp_size, optimize_args=dict(
-            method='Nelder-Mead', options=dict(maxiter=100000, xatol=5e-4, fatol=5e-4, disp=False)))
+            method='Nelder-Mead', options=dict(maxiter=10000, xatol=1e-3, fatol=1e-3, disp=False)))
         self.stamps = None
         self.results = None
 
