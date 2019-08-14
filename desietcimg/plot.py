@@ -117,12 +117,29 @@ def plot_guide_results(GCR, size=4, pad=0.02, ellipses=True, params=True):
     return A
 
 
-def plot_psf_profile(GCR, fiberdiam_um=107, pixel_size_um=9., inset_size=35):
+def plot_psf_profile(GCR, size=4, pad=0.4, inset_size=35):
     assert inset_size % 2 == 1
     P, W = GCR.profile
     h1 = len(P) // 2
     h2 = inset_size // 2
     inset = slice(h1 - h2, h1 + h2 + 1)
-    ax = plot_image(P[inset, inset], W[inset, inset])
-    rfiber_pix = 0.5 * fiberdiam_um / pixel_size_um
-    ax.add_artist(plt.Circle((0, 0), rfiber_pix, fc='none', ec='r', lw=2, alpha=0.5))
+
+    width = 2.5 * size + pad
+    height = size
+    fig = plt.figure(figsize=(width, height))
+    lhs = plt.axes((0., 0., size / width, 1.))
+    rhs = plt.axes(((size + pad) / width, pad / height, (width - size) / width, (height - pad) / height))
+    plot_image(P[inset, inset], W[inset, inset], ax=lhs)
+    fwhm = GCR.meta['FWHM']
+    lhs.text(0.5, 0.95, 'FWHM = {0:.2f}"'.format(fwhm), fontsize=16, color='w',
+             verticalalignment='center', horizontalalignment='center',
+             transform=lhs.transAxes, fontweight='bold')
+    rfiber_pix = 0.5 * GCR.meta['FIBSIZ'] / GCR.meta['PIXSIZ']
+    lhs.add_artist(plt.Circle((0, 0), rfiber_pix, fc='none', ec='r', lw=2, alpha=0.5))
+
+    rhs.plot(GCR.tabulated['rang'], GCR.tabulated['prof'], 'k.-', label='Profile')
+    rhs.set_ylim(-0.02, 1.02)
+    rhs.set_xlim(0., 3.)
+    rhs.axvline(0.5 * fwhm, c='k', ls='--')
+    rhs.legend(loc='upper right')
+    rhs.set_xlabel('Centroid offset [arcsec]')

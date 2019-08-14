@@ -22,18 +22,26 @@ class GuideCameraAnalysis(object):
     ----------
     stamp_size : int
         Analysis will use square stamps with this pixel size. Must be odd.
+    fiber_diam_um : float
+        The fiber diameter in microns.
     pixel_size_um : float
-        The pixel  size in microns.
+        The pixel size in microns.
     plate_scales : tuple of two floats
         The nominal plate scales in microns / arcsec along the pixel x and y directions.
     match_fwhm_arcsec : float
         The nominal FWHM of a Moffat PSF with beta=3.5 used as a matched filter to detect
         PSF-like sources.
+    nangbins : int
+        Number of angular bins to use for FWHM and fiber fraction calculations.
     """
-    def __init__(self, stamp_size=65, pixel_size_um=9, plate_scales=(70., 76.), match_fwhm_arcsec=1.1):
+    def __init__(self, stamp_size=65, fiber_diam_um=107., pixel_size_um=9, plate_scales=(70., 76.),
+                 match_fwhm_arcsec=1.1, nangbins=40):
         assert stamp_size % 2 == 1
         self.rsize = stamp_size // 2
         self.stamp_size = stamp_size
+        self.plate_scales = plate_scales
+        self.fiber_diam_um = fiber_diam_um
+        self.pixel_size_um = pixel_size_um
         # Build a nominal PSF model for detection matching.
         profile = functools.partial(moffat_profile, fwhm=match_fwhm_arcsec,
                                     sx=plate_scales[0] / pixel_size_um, sy=plate_scales[1] / pixel_size_um)
@@ -41,6 +49,15 @@ class GuideCameraAnalysis(object):
         # Define pixel coordinate grids for moment calculations.
         dxy = np.arange(stamp_size) - 0.5 * (stamp_size - 1)
         self.xgrid, self.ygrid = np.meshgrid(dxy, dxy, sparse=False)
+        # Calculate coordinates of pixel centers in arcsecs.
+        xang = self.xgrid * self.pixel_size_um / self.plate_scales[0]
+        yang = self.ygrid * self.pixel_size_um / self.plate_scales[1]
+        self.rang_pix = np.hypot(xang, yang).reshape(-1)
+        # Specify angular binning for FWHM and fiber fraction calculations.
+        rmax = dxy[-1] * self.pixel_size_um / max(self.plate_scales)
+        self.angbins = np.linspace(0., rmax, nangbins + 1)
+        self.tabulated = np.zeros(nangbins, dtype=[('rang', np.float32), ('prof', np.float32)])
+        self.tabulated['rang'] = 0.5 * (self.angbins[1:] + self.angbins[:-1])
         # Initialize primary fitter.
         self.fitter = desietcimg.fit.GaussFitter(stamp_size)
         # Initialize a slower secondary fitter for when the primary fitter fails to converge.
@@ -88,6 +105,10 @@ class GuideCameraAnalysis(object):
         meta = dict(meta)
         meta['NSRC'] = nsrc
         meta['SSIZE'] = self.stamp_size
+        meta['FIBSIZ'] = self.fiber_diam_um
+        meta['PIXSIZ'] = self.pixel_size_um
+        meta['XSCALE'] = self.plate_scales[0]
+        meta['YSCALE'] = self.plate_scales[1]
         # Mask the most obvious defects in the whole image with a very loose chisq cut.
         W, nmasked = desietcimg.util.mask_defects(D, W, chisq_max=1e4, min_neighbors=7, inplace=True)
         if verbose:
@@ -223,8 +244,12 @@ class GuideCameraAnalysis(object):
 
         results = self.select_psf(results, verbose=verbose)
         profile = self.get_psf_profile(stamps, results)
+        fwhm, circularized = self.calculate_fwhm(profile)
+        meta['FWHM'] = fwhm
+        
+        self.tabulated['prof'] = circularized
 
-        return GuideCameraResults(stamps, results, profile, meta)
+        return GuideCameraResults(stamps, results, profile, self.tabulated.copy(), meta)
 
     def  select_psf(self, results, smin=2.0, gmax=0.25, rmax=1.0, sscale=0.5, gscale=0.05, nbright=4, verbose=False):
         """Select the PSF-like  sources.
@@ -278,14 +303,29 @@ class GuideCameraAnalysis(object):
         P = np.divide(WPsum, Wsum, out=np.zeros_like(Wsum), where=Wsum > 0)
         return P, Wsum
 
+    def calculate_fwhm(self, profile, nmax=3, nbins=25):
+        P, W = profile
+        rangmid = self.tabulated['rang']
+        WZ, _ = np.histogram(self.rang_pix, bins=self.angbins, weights=(P * W).reshape(-1))
+        W, _ = np.histogram(self.rang_pix, bins=self.angbins, weights=W.reshape(-1))
+        Z = np.divide(WZ, W, out=np.zeros_like(W), where=W > 0)
+        Z /= Z[0]
+        # Find the first bin where Z <= 0.5.
+        k = np.argmax(Z <= 0.5)
+        # Use linear interpolation over this bin to estimate FWHM.
+        s = 0.5 - Z[k]
+        fwhm = 2 * ((1 - s) * rangmid[k] + s * rangmid[k + 1])
+        return fwhm, Z
+
 
 class GuideCameraResults(object):
     """Container for guide camera analysis results.
     """
-    def __init__(self, stamps, results, profile, meta):
+    def __init__(self, stamps, results, profile, tabulated, meta):
         self.stamps = stamps
         self.results = results
         self.profile = profile
+        self.tabulated = tabulated
         self.meta = meta
 
     def print(self):
@@ -324,6 +364,8 @@ class GuideCameraResults(object):
                 hdus.write(np.stack(self.stamps[k]), header=hdr, extname='SRC{0}'.format(k))
             # Write the profile.
             hdus.write(np.stack(self.profile), extname='PROFILE')
+            # Write the tabulated data.
+            hdus.write(self.tabulated, extname='TABLE')
 
     @staticmethod
     def load(name):
@@ -346,4 +388,5 @@ class GuideCameraResults(object):
                 stamps.append((data[0].copy(), data[1].copy()))
             data = hdus['PROFILE'].read()
             profile = (data[0].copy(), data[1].copy())
-        return GuideCameraResults(stamps, results, profile, meta)
+            tabulated = hdus['TABLE'].read()
+        return GuideCameraResults(stamps, results, profile, tabulated, meta)
