@@ -115,3 +115,14 @@ def plot_guide_results(GCR, size=4, pad=0.02, ellipses=True, params=True):
                 label = f'$\\nu$ {result["snr"]:.1f} s {result["s"]:.1f} g {g:.2f}'
                 ax.text(0.5, 0.95, label, fontsize=18, color=color, **kwargs)
     return A
+
+
+def plot_psf_profile(GCR, fiberdiam_um=107, pixel_size_um=9., inset_size=35):
+    assert inset_size % 2 == 1
+    P, W = GCR.profile
+    h1 = len(P) // 2
+    h2 = inset_size // 2
+    inset = slice(h1 - h2, h1 + h2 + 1)
+    ax = plot_image(P[inset, inset], W[inset, inset])
+    rfiber_pix = 0.5 * fiberdiam_um / pixel_size_um
+    ax.add_artist(plt.Circle((0, 0), rfiber_pix, fc='none', ec='r', lw=2, alpha=0.5))

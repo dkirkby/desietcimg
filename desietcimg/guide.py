@@ -222,10 +222,11 @@ class GuideCameraAnalysis(object):
             results.append((result, slice(ylo, yhi), slice(xlo, xhi)))
 
         results = self.select_psf(results, verbose=verbose)
+        profile = self.get_psf_profile(stamps, results)
 
-        return GuideCameraResults(stamps, results, meta)
+        return GuideCameraResults(stamps, results, profile, meta)
 
-    def  select_psf(self, results, smin=2.0, gmax=0.25, sscale=0.5, gscale=0.05, nbright=4, verbose=False):
+    def  select_psf(self, results, smin=2.0, gmax=0.25, rmax=1.0, sscale=0.5, gscale=0.05, nbright=4, verbose=False):
         """Select the PSF-like  sources.
 
         Results are stored as a boolean in the 'psf' attribute.
@@ -233,15 +234,17 @@ class GuideCameraAnalysis(object):
         nsrc = len(results)
         svec = np.zeros(nsrc)
         gvec = np.ones(nsrc)
+        rvec = np.zeros(nsrc)
         snrvec = np.zeros(nsrc)
         for k, (fit, yslice, xslice) in enumerate(results):
             if not fit['success']:
                 continue
             svec[k] = fit['s']
             gvec[k] = np.hypot(fit['g1'], fit['g2'])
+            rvec[k] = np.hypot(fit['x0'], fit['y0'])
             snrvec[k] = fit['snr']
         # Identify the PSF candidates.
-        cand = (svec > smin) & (gvec < gmax)
+        cand = (svec > smin) & (gvec < gmax) & (rvec < rmax)
         # Pick the (up to) nbright brightest PSF candidates.
         snrvec[~cand] = 0
         brightest = np.argsort(snrvec)[-nbright:]
@@ -260,13 +263,29 @@ class GuideCameraAnalysis(object):
             fit['psf'] = bool(psf[k])
         return results
 
+    def get_psf_profile(self, stamps, results):
+        """Stack PSF-like detected sources to estimate the normalized PSF profile.
+        """
+        WPsum = np.zeros((self.stamp_size, self.stamp_size))
+        Wsum = np.zeros((self.stamp_size, self.stamp_size))
+        for k, (D, W) in enumerate(stamps):
+            fit, yslice, xslice = results[k]
+            if not fit['psf']:
+                continue
+            b, f = fit['b'], fit['f']
+            WPsum += W * (D - b) * f
+            Wsum += f ** 2 * W
+        P = np.divide(WPsum, Wsum, out=np.zeros_like(Wsum), where=Wsum > 0)
+        return P, Wsum
+
 
 class GuideCameraResults(object):
     """Container for guide camera analysis results.
     """
-    def __init__(self, stamps, results, meta):
+    def __init__(self, stamps, results, profile, meta):
         self.stamps = stamps
         self.results = results
+        self.profile = profile
         self.meta = meta
 
     def print(self):
@@ -303,6 +322,8 @@ class GuideCameraResults(object):
                 for key, val in result.items():
                     hdr[key.upper() + '_'] = val
                 hdus.write(np.stack(self.stamps[k]), header=hdr, extname='SRC{0}'.format(k))
+            # Write the profile.
+            hdus.write(np.stack(self.profile), extname='PROFILE')
 
     @staticmethod
     def load(name):
@@ -323,4 +344,6 @@ class GuideCameraResults(object):
                 results.append((result, y_slice, x_slice))
                 data = hdus[extname].read()
                 stamps.append((data[0].copy(), data[1].copy()))
-        return GuideCameraResults(stamps, results, meta)
+            data = hdus['PROFILE'].read()
+            profile = (data[0].copy(), data[1].copy())
+        return GuideCameraResults(stamps, results, profile, meta)
