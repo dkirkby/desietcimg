@@ -221,7 +221,44 @@ class GuideCameraAnalysis(object):
             stamps.append((stamp, ivar))
             results.append((result, slice(ylo, yhi), slice(xlo, xhi)))
 
+        results = self.select_psf(results, verbose=verbose)
+
         return GuideCameraResults(stamps, results, meta)
+
+    def  select_psf(self, results, smin=2.0, gmax=0.25, sscale=0.5, gscale=0.05, nbright=4, verbose=False):
+        """Select the PSF-like  sources.
+
+        Results are stored as a boolean in the 'psf' attribute.
+        """
+        nsrc = len(results)
+        svec = np.zeros(nsrc)
+        gvec = np.ones(nsrc)
+        snrvec = np.zeros(nsrc)
+        for k, (fit, yslice, xslice) in enumerate(results):
+            if not fit['success']:
+                continue
+            svec[k] = fit['s']
+            gvec[k] = np.hypot(fit['g1'], fit['g2'])
+            snrvec[k] = fit['snr']
+        # Identify the PSF candidates.
+        cand = (svec > smin) & (gvec < gmax)
+        # Pick the (up to) nbright brightest PSF candidates.
+        snrvec[~cand] = 0
+        brightest = np.argsort(snrvec)[-nbright:]
+        # Get the median size and ellipticity of the brightest candidates.
+        smed = np.median(svec[brightest])
+        gmed = np.median(gvec[brightest])
+        if verbose:
+            print('  Selected {0} PSF candidates with median s = {1:.1f}, g = {2:.3f} of {3} brightest'
+                  .format(np.count_nonzero(cand), smed, gmed, len(brightest)))
+        # Select all candidates that are close enough to the median.
+        dist = ((svec - smed) / sscale) ** 2 + ((gvec - gmed) / gscale) ** 2
+        psf = cand & (dist < 1)
+        if verbose:
+            print('  Selected {0} final PSF candidates.'.format(np.count_nonzero(psf)))
+        for k, (fit, yslice, xslice) in enumerate(results):
+            fit['psf'] = bool(psf[k])
+        return results
 
 
 class GuideCameraResults(object):
