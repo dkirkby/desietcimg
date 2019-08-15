@@ -257,11 +257,11 @@ class GuideCameraAnalysis(object):
         results = self.select_psf(results, verbose=verbose)
         profile = self.get_psf_profile(stamps, results)
         fwhm, circularized = self.calculate_fwhm(profile)
-        meta['FWHM'] = fwhm
+        meta['FWHM'] = fwhm if np.isfinite(fwhm) else 0.
         self.profile_tab['prof'] = circularized
 
         fiberfrac = self.calculate_fiberfrac(profile)
-        meta['FFRAC'] = fiberfrac[0]
+        meta['FFRAC'] = fiberfrac[0] if np.isfinite(fiberfrac[0]) else 0.
         self.fiberfrac_tab['frac'] = fiberfrac
 
         return GuideCameraResults(stamps, results, profile, self.profile_tab, self.fiberfrac_tab, meta)
@@ -355,6 +355,7 @@ class GuideCameraResults(object):
 
     def print(self):
         rsize = self.meta['SSIZE'] // 2
+        print('FWHM = {0:.2f}" FIBERFRAC = {1:.3f}'.format(self.meta['FWHM'], self.meta['FFRAC']))
         for k in range(self.meta['NSRC']):
             result, y_slice, x_slice = self.results[k]
             print('SRC{0} [x={1}, y={2}]'.format(

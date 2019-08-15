@@ -117,7 +117,9 @@ def plot_guide_results(GCR, size=4, pad=0.02, ellipses=True, params=True):
     return A
 
 
-def plot_psf_profile(GCR, size=4, pad=0.4, inset_size=35):
+def plot_psf_profile(GCR, size=4, pad=0.4, inset_size=35, max_ang=2.0):
+    """
+    """
     assert inset_size % 2 == 1
     P, W = GCR.profile
     h1 = len(P) // 2
@@ -142,7 +144,6 @@ def plot_psf_profile(GCR, size=4, pad=0.4, inset_size=35):
     rhs.plot(GCR.profile_tab['rang'], GCR.profile_tab['prof'], 'k.-', label='Profile')
     rhs.plot(GCR.fiberfrac_tab['rang'], GCR.fiberfrac_tab['frac'], 'b.-', label='Fiber Frac')
     rhs.set_ylim(-0.02, 1.02)
-    rhs.set_xlim(0., 3.)
-    rhs.axvline(0.5 * fwhm, c='k', ls='--')
+    rhs.set_xlim(0., max_ang)
     rhs.legend(loc='upper right')
     rhs.set_xlabel('Centroid offset [arcsec]')
