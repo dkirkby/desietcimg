@@ -267,7 +267,7 @@ class GuideCameraAnalysis(object):
         return GuideCameraResults(stamps, results, profile, self.profile_tab, self.fiberfrac_tab, meta)
 
     def  select_psf(self, results, smin=2.0, gmax=0.25, rmax=1.0, sscale=0.5, gscale=0.05, nbright=4, verbose=False):
-        """Select the PSF-like  sources.
+        """Select the PSF-like sources.
 
         Results are stored as a boolean in the 'psf' attribute.
         """
@@ -285,20 +285,25 @@ class GuideCameraAnalysis(object):
             snrvec[k] = fit['snr']
         # Identify the PSF candidates.
         cand = (svec > smin) & (gvec < gmax) & (rvec < rmax)
-        # Pick the (up to) nbright brightest PSF candidates.
-        snrvec[~cand] = 0
-        brightest = np.argsort(snrvec)[-nbright:]
-        # Get the median size and ellipticity of the brightest candidates.
-        smed = np.median(svec[brightest])
-        gmed = np.median(gvec[brightest])
+        psf = np.zeros_like(cand)
+        if np.any(cand):
+            # Pick the (up to) nbright brightest PSF candidates.
+            snrvec[~cand] = 0
+            brightest = np.argsort(snrvec)[-nbright:]
+            # Get the median size and ellipticity of the brightest candidates.
+            smed = np.median(svec[brightest])
+            gmed = np.median(gvec[brightest])
+            if verbose:
+                print('  Selected {0} PSF candidates with median s = {1:.1f}, g = {2:.3f} of {3} brightest'
+                    .format(np.count_nonzero(cand), smed, gmed, len(brightest)))
+            # Select all candidates that are close enough to the median.
+            dist = ((svec - smed) / sscale) ** 2 + ((gvec - gmed) / gscale) ** 2
+            psf = cand & (dist < 1)
+            if not np.any(psf):
+                # Assume that the brightest candidate is a PSF.
+                psf[np.where(cand)[0][0]] = True
         if verbose:
-            print('  Selected {0} PSF candidates with median s = {1:.1f}, g = {2:.3f} of {3} brightest'
-                  .format(np.count_nonzero(cand), smed, gmed, len(brightest)))
-        # Select all candidates that are close enough to the median.
-        dist = ((svec - smed) / sscale) ** 2 + ((gvec - gmed) / gscale) ** 2
-        psf = cand & (dist < 1)
-        if verbose:
-            print('  Selected {0} final PSF candidates.'.format(np.count_nonzero(psf)))
+            print('  Selected {0} final PSF candidate(s).'.format(np.count_nonzero(psf)))
         for k, (fit, yslice, xslice) in enumerate(results):
             fit['psf'] = bool(psf[k])
         return results
