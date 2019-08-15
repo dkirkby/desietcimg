@@ -254,15 +254,24 @@ class GuideCameraAnalysis(object):
             stamps.append((stamp, ivar))
             results.append((result, slice(ylo, yhi), slice(xlo, xhi)))
 
-        results = self.select_psf(results, verbose=verbose)
-        profile = self.get_psf_profile(stamps, results)
-        fwhm, circularized = self.calculate_fwhm(profile)
-        meta['FWHM'] = fwhm if np.isfinite(fwhm) else 0.
-        self.profile_tab['prof'] = circularized
-
-        fiberfrac = self.calculate_fiberfrac(profile)
-        meta['FFRAC'] = fiberfrac[0] if np.isfinite(fiberfrac[0]) else 0.
-        self.fiberfrac_tab['frac'] = fiberfrac
+        results, psf = self.select_psf(results, verbose=verbose)
+        if np.any(psf):
+            profile = self.get_psf_profile(stamps, results)
+            fwhm, circularized = self.calculate_fwhm(profile)
+            meta['FWHM'] = fwhm
+            self.profile_tab['prof'] = circularized
+            fiberfrac = self.calculate_fiberfrac(profile)
+            meta['FFRAC'] = fiberfrac[0] if np.isfinite(fiberfrac[0]) else 0.
+            self.fiberfrac_tab['frac'] = fiberfrac
+        else:
+            meta['FWHM'] = -1.
+            profile = np.zeros_like(self.stamps[0][0]), np.zeros_like(self.stamps[0][0])
+            self.profile_tab['prof'] = 0.
+            meta['FFRAC'] = -1.
+            self.fiberfrac_tab['frac'] = 0.
+        if verbose:
+            print('  NPSF = {0} FWHM = {1:.2f}" FIBERFRAC = {2:.3f}'.format(
+                np.count_nonzero(psf), meta['FWHM'], meta['FFRAC']))
 
         return GuideCameraResults(stamps, results, profile, self.profile_tab, self.fiberfrac_tab, meta)
 
@@ -287,15 +296,14 @@ class GuideCameraAnalysis(object):
         cand = (svec > smin) & (gvec < gmax) & (rvec < rmax)
         psf = np.zeros_like(cand)
         if np.any(cand):
-            # Pick the (up to) nbright brightest PSF candidates.
-            snrvec[~cand] = 0
-            brightest = np.argsort(snrvec)[-nbright:]
-            # Get the median size and ellipticity of the brightest candidates.
+            # Select the PSF candidates with SNR within a factor of 5 of the brightest candidate.
+            brightest = snrvec >= snrvec[0] / 5
+            # Get the median size and ellipticity of these brightest candidates.
             smed = np.median(svec[brightest])
             gmed = np.median(gvec[brightest])
             if verbose:
                 print('  Selected {0} PSF candidates with median s = {1:.1f}, g = {2:.3f} of {3} brightest'
-                    .format(np.count_nonzero(cand), smed, gmed, len(brightest)))
+                    .format(np.count_nonzero(cand), smed, gmed, np.count_nonzero(brightest)))
             # Select all candidates that are close enough to the median.
             dist = ((svec - smed) / sscale) ** 2 + ((gvec - gmed) / gscale) ** 2
             psf = cand & (dist < 1)
@@ -306,7 +314,7 @@ class GuideCameraAnalysis(object):
             print('  Selected {0} final PSF candidate(s).'.format(np.count_nonzero(psf)))
         for k, (fit, yslice, xslice) in enumerate(results):
             fit['psf'] = bool(psf[k])
-        return results
+        return results, psf
 
     def get_psf_profile(self, stamps, results):
         """Stack PSF-like detected sources to estimate the normalized PSF profile.
