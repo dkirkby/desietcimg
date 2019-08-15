@@ -137,7 +137,7 @@ def plot_psf_profile(GCR, size=4, pad=0.4, inset_size=35):
     rfiber_pix = 0.5 * GCR.meta['FIBSIZ'] / GCR.meta['PIXSIZ']
     lhs.add_artist(plt.Circle((0, 0), rfiber_pix, fc='none', ec='r', lw=2, alpha=0.5))
 
-    rhs.plot(GCR.tabulated['rang'], GCR.tabulated['prof'], 'k.-', label='Profile')
+    rhs.plot(GCR.profile_tab['rang'], GCR.profile_tab['prof'], 'k.-', label='Profile')
     rhs.set_ylim(-0.02, 1.02)
     rhs.set_xlim(0., 3.)
     rhs.axvline(0.5 * fwhm, c='k', ls='--')

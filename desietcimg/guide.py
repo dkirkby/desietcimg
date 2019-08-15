@@ -53,11 +53,11 @@ class GuideCameraAnalysis(object):
         xang = self.xgrid * self.pixel_size_um / self.plate_scales[0]
         yang = self.ygrid * self.pixel_size_um / self.plate_scales[1]
         self.rang_pix = np.hypot(xang, yang).reshape(-1)
-        # Specify angular binning for FWHM and fiber fraction calculations.
+        # Specify angular binning for profile and FWHM calculations.
         rmax = dxy[-1] * self.pixel_size_um / max(self.plate_scales)
         self.angbins = np.linspace(0., rmax, nangbins + 1)
-        self.tabulated = np.zeros(nangbins, dtype=[('rang', np.float32), ('prof', np.float32)])
-        self.tabulated['rang'] = 0.5 * (self.angbins[1:] + self.angbins[:-1])
+        self.profile_tab = np.zeros(nangbins, dtype=[('rang', np.float32), ('prof', np.float32)])
+        self.profile_tab['rang'] = 0.5 * (self.angbins[1:] + self.angbins[:-1])
         # Initialize primary fitter.
         self.fitter = desietcimg.fit.GaussFitter(stamp_size)
         # Initialize a slower secondary fitter for when the primary fitter fails to converge.
@@ -247,9 +247,9 @@ class GuideCameraAnalysis(object):
         fwhm, circularized = self.calculate_fwhm(profile)
         meta['FWHM'] = fwhm
         
-        self.tabulated['prof'] = circularized
+        self.profile_tab['prof'] = circularized
 
-        return GuideCameraResults(stamps, results, profile, self.tabulated.copy(), meta)
+        return GuideCameraResults(stamps, results, profile, self.profile_tab.copy(), meta)
 
     def  select_psf(self, results, smin=2.0, gmax=0.25, rmax=1.0, sscale=0.5, gscale=0.05, nbright=4, verbose=False):
         """Select the PSF-like  sources.
@@ -305,7 +305,7 @@ class GuideCameraAnalysis(object):
 
     def calculate_fwhm(self, profile, nmax=3, nbins=25):
         P, W = profile
-        rangmid = self.tabulated['rang']
+        rangmid = self.profile_tab['rang']
         WZ, _ = np.histogram(self.rang_pix, bins=self.angbins, weights=(P * W).reshape(-1))
         W, _ = np.histogram(self.rang_pix, bins=self.angbins, weights=W.reshape(-1))
         Z = np.divide(WZ, W, out=np.zeros_like(W), where=W > 0)
@@ -321,11 +321,11 @@ class GuideCameraAnalysis(object):
 class GuideCameraResults(object):
     """Container for guide camera analysis results.
     """
-    def __init__(self, stamps, results, profile, tabulated, meta):
+    def __init__(self, stamps, results, profile, profile_tab, meta):
         self.stamps = stamps
         self.results = results
         self.profile = profile
-        self.tabulated = tabulated
+        self.profile_tab = profile_tab
         self.meta = meta
 
     def print(self):
@@ -365,7 +365,7 @@ class GuideCameraResults(object):
             # Write the profile.
             hdus.write(np.stack(self.profile), extname='PROFILE')
             # Write the tabulated data.
-            hdus.write(self.tabulated, extname='TABLE')
+            hdus.write(self.profile_tab, extname='PROFTAB')
 
     @staticmethod
     def load(name):
@@ -388,5 +388,5 @@ class GuideCameraResults(object):
                 stamps.append((data[0].copy(), data[1].copy()))
             data = hdus['PROFILE'].read()
             profile = (data[0].copy(), data[1].copy())
-            tabulated = hdus['TABLE'].read()
-        return GuideCameraResults(stamps, results, profile, tabulated, meta)
+            profile_tab = hdus['PROFTAB'].read()
+        return GuideCameraResults(stamps, results, profile, profile_tab, meta)
