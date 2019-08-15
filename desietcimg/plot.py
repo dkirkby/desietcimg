@@ -130,14 +130,17 @@ def plot_psf_profile(GCR, size=4, pad=0.4, inset_size=35):
     lhs = plt.axes((0., 0., size / width, 1.))
     rhs = plt.axes(((size + pad) / width, pad / height, (width - size) / width, (height - pad) / height))
     plot_image(P[inset, inset], W[inset, inset], ax=lhs)
+    kwargs = dict(fontsize=16, color='w', verticalalignment='center', horizontalalignment='center',
+                  transform=lhs.transAxes, fontweight='bold')
     fwhm = GCR.meta['FWHM']
-    lhs.text(0.5, 0.95, 'FWHM = {0:.2f}"'.format(fwhm), fontsize=16, color='w',
-             verticalalignment='center', horizontalalignment='center',
-             transform=lhs.transAxes, fontweight='bold')
+    lhs.text(0.5, 0.95, 'FWHM = {0:.2f}"'.format(fwhm), **kwargs)
+    ffrac = GCR.meta['FFRAC']
+    lhs.text(0.5, 0.05, 'FIBERFRAC = {0:.3f}'.format(ffrac), **kwargs)
     rfiber_pix = 0.5 * GCR.meta['FIBSIZ'] / GCR.meta['PIXSIZ']
     lhs.add_artist(plt.Circle((0, 0), rfiber_pix, fc='none', ec='r', lw=2, alpha=0.5))
 
     rhs.plot(GCR.profile_tab['rang'], GCR.profile_tab['prof'], 'k.-', label='Profile')
+    rhs.plot(GCR.fiberfrac_tab['rang'], GCR.fiberfrac_tab['frac'], 'b.-', label='Fiber Frac')
     rhs.set_ylim(-0.02, 1.02)
     rhs.set_xlim(0., 3.)
     rhs.axvline(0.5 * fwhm, c='k', ls='--')

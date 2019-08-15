@@ -58,6 +58,18 @@ class GuideCameraAnalysis(object):
         self.angbins = np.linspace(0., rmax, nangbins + 1)
         self.profile_tab = np.zeros(nangbins, dtype=[('rang', np.float32), ('prof', np.float32)])
         self.profile_tab['rang'] = 0.5 * (self.angbins[1:] + self.angbins[:-1])
+        # Prepare fiberloss calculations.
+        noffset = 21
+        offsets = np.linspace(0., 2., noffset)
+        self.offset_fiber = np.empty((noffset, stamp_size, stamp_size))
+        profile = functools.partial(
+            desietcimg.util.fiber_profile, r0=0.5 * fiber_diam_um / pixel_size_um, blur=0.1)
+        for k, offset in enumerate(offsets):
+            dx = offset * plate_scales[0] / pixel_size_um
+            self.offset_fiber[k] = desietcimg.util.make_template(
+                stamp_size, profile, dx=dx, normalized=False)
+        self.fiberfrac_tab = np.zeros(noffset, dtype=[('rang', np.float32), ('frac', np.float32)])
+        self.fiberfrac_tab['rang'] = offsets
         # Initialize primary fitter.
         self.fitter = desietcimg.fit.GaussFitter(stamp_size)
         # Initialize a slower secondary fitter for when the primary fitter fails to converge.
@@ -246,10 +258,13 @@ class GuideCameraAnalysis(object):
         profile = self.get_psf_profile(stamps, results)
         fwhm, circularized = self.calculate_fwhm(profile)
         meta['FWHM'] = fwhm
-        
         self.profile_tab['prof'] = circularized
 
-        return GuideCameraResults(stamps, results, profile, self.profile_tab.copy(), meta)
+        fiberfrac = self.calculate_fiberfrac(profile)
+        meta['FFRAC'] = fiberfrac[0]
+        self.fiberfrac_tab['frac'] = fiberfrac
+
+        return GuideCameraResults(stamps, results, profile, self.profile_tab, self.fiberfrac_tab, meta)
 
     def  select_psf(self, results, smin=2.0, gmax=0.25, rmax=1.0, sscale=0.5, gscale=0.05, nbright=4, verbose=False):
         """Select the PSF-like  sources.
@@ -317,15 +332,25 @@ class GuideCameraAnalysis(object):
         fwhm = 2 * ((1 - s) * rangmid[k] + s * rangmid[k + 1])
         return fwhm, Z
 
+    def calculate_fiberfrac(self, profile):
+        P, W = profile
+        noffset = len(self.offset_fiber)
+        fiberfrac = np.zeros(noffset)
+        Psum = np.sum(P)
+        for k in range(noffset):
+            fiberfrac[k] = np.sum(P * self.offset_fiber[k]) / Psum
+        return fiberfrac
+
 
 class GuideCameraResults(object):
     """Container for guide camera analysis results.
     """
-    def __init__(self, stamps, results, profile, profile_tab, meta):
+    def __init__(self, stamps, results, profile, profile_tab, fiberfrac_tab, meta):
         self.stamps = stamps
         self.results = results
         self.profile = profile
         self.profile_tab = profile_tab
+        self.fiberfrac_tab = fiberfrac_tab
         self.meta = meta
 
     def print(self):
@@ -366,6 +391,7 @@ class GuideCameraResults(object):
             hdus.write(np.stack(self.profile), extname='PROFILE')
             # Write the tabulated data.
             hdus.write(self.profile_tab, extname='PROFTAB')
+            hdus.write(self.fiberfrac_tab, extname='FRACTAB')
 
     @staticmethod
     def load(name):
@@ -388,5 +414,8 @@ class GuideCameraResults(object):
                 stamps.append((data[0].copy(), data[1].copy()))
             data = hdus['PROFILE'].read()
             profile = (data[0].copy(), data[1].copy())
+            # Read the tabulated data.
             profile_tab = hdus['PROFTAB'].read()
-        return GuideCameraResults(stamps, results, profile, profile_tab, meta)
+            fiberfrac_tab = hdus['FRACTAB'].read()
+            fiberfrac_tab = hdus['FRACTAB'].read()
+            return GuideCameraResults(stamps, results, profile, profile_tab, fiberfrac_tab, meta)

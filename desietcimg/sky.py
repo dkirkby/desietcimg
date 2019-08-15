@@ -11,19 +11,6 @@ import scipy.stats
 import desietcimg.util
 
 
-def fiber_profile(x, y, r0, blur=0.1):
-    """Radial profile of a blurred disk.
-
-    This implementation approximates a 2D Gaussian blur using a 1D erf,
-    so is only exact in the limit of zero blur (because the 2D
-    Jacobian requires less blur to r > r0 than r < r0 to preserve area).
-    This approximation means that we are assuming a slightly assymetric
-    blur.
-    """
-    r = np.sqrt(x ** 2 + y ** 2)
-    return 0.5 + 0.5 * scipy.special.erf((r0 - r) / (np.sqrt(2) * blur))
-
-
 class SkyCameraAnalysis(object):
     """ Initialize the Sky Camera image analysis.
     
@@ -67,7 +54,7 @@ class SkyCameraAnalysis(object):
                                +0.5 * search_pix / binning, search_steps)
         self.T = np.empty((search_steps, search_steps, ssize, ssize))
         profile = functools.partial(
-            fiber_profile, r0=0.5 * self.fiberdiam / binning, blur=self.blur / binning)
+            desietcimg.util.fiber_profile, r0=0.5 * self.fiberdiam / binning, blur=self.blur / binning)
         for j, dy in enumerate(self.dxy):
             for i, dx in enumerate(self.dxy):
                 self.T[j, i] = desietcimg.util.make_template(

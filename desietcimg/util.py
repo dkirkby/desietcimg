@@ -85,6 +85,19 @@ def make_template(size, profile, dx=0, dy=0, oversampling=10, normalized=True):
     return T
 
 
+def fiber_profile(x, y, r0, blur=0.1):
+    """Radial profile of a blurred disk.
+
+    This implementation approximates a 2D Gaussian blur using a 1D erf,
+    so is only exact in the limit of zero blur (because the 2D
+    Jacobian requires less blur to r > r0 than r < r0 to preserve area).
+    This approximation means that we are assuming a slightly assymetric
+    blur.
+    """
+    r = np.sqrt(x ** 2 + y ** 2)
+    return 0.5 + 0.5 * scipy.special.erf((r0 - r) / (np.sqrt(2) * blur))
+
+
 class Convolutions(object):
     """Convolution of one or more sources with the same kernel.
     
