@@ -275,7 +275,7 @@ class GuideCameraAnalysis(object):
 
         return GuideCameraResults(stamps, results, profile, self.profile_tab, self.fiberfrac_tab, meta)
 
-    def  select_psf(self, results, smin=2.0, gmax=0.25, rmax=1.0, sscale=0.5, gscale=0.05, nbright=4, verbose=False):
+    def  select_psf(self, results, smin=2.0, gmax=0.25, rmax=2.0, dsmax=1.5, dgmax=0.10, nbright=5, verbose=False):
         """Select the PSF-like sources.
 
         Results are stored as a boolean in the 'psf' attribute.
@@ -292,24 +292,33 @@ class GuideCameraAnalysis(object):
             gvec[k] = np.hypot(fit['g1'], fit['g2'])
             rvec[k] = np.hypot(fit['x0'], fit['y0'])
             snrvec[k] = fit['snr']
-        # Identify the PSF candidates.
+        # Identify the PSF candidates with loose cuts to reject cosmics.
         cand = (svec > smin) & (gvec < gmax) & (rvec < rmax)
+        if verbose:
+            print('Rejected stamps: {0}'.format(np.where(~cand)[0]))
         psf = np.zeros_like(cand)
         if np.any(cand):
             # Select the PSF candidates with SNR within a factor of 5 of the brightest candidate.
-            brightest = snrvec >= snrvec[0] / 5
-            # Get the median size and ellipticity of these brightest candidates.
-            smed = np.median(svec[brightest])
+            snrmax = np.max(snrvec[cand])
+            brightest = (snrvec >= snrmax / 5) & cand
+            # Use at most nbright bright candidates.
+            brightest = np.where(brightest)[0][:nbright]
+            if verbose:
+                print('Brightest candidates: {0}'.format(brightest))
+            # Get the minimum size and median ellipticity of these brightest candidates.
+            smin = np.min(svec[brightest])
             gmed = np.median(gvec[brightest])
             if verbose:
-                print('  Selected {0} PSF candidates with median s = {1:.1f}, g = {2:.3f} of {3} brightest'
-                    .format(np.count_nonzero(cand), smed, gmed, np.count_nonzero(brightest)))
-            # Select all candidates that are close enough to the median.
-            dist = ((svec - smed) / sscale) ** 2 + ((gvec - gmed) / gscale) ** 2
-            psf = cand & (dist < 1)
+                print('Brightest have min s = {0:.2f}, median g = {1:.3f}'.format(smin, gmed))
+            # Select all candidates that are close enough these values.
+            psf = cand & (svec < smin + dsmax) & (gvec < gmed + dgmax)
             if not np.any(psf):
                 # Assume that the brightest candidate is a PSF.
+                if verbose:
+                    print('Fallback to using brightest candidate.')
                 psf[np.where(cand)[0][0]] = True
+            if verbose:
+                print('Final selection: {0}'.format(np.where(psf)[0]))
         if verbose:
             print('  Selected {0} final PSF candidate(s).'.format(np.count_nonzero(psf)))
         for k, (fit, yslice, xslice) in enumerate(results):
@@ -341,7 +350,7 @@ class GuideCameraAnalysis(object):
         # Find the first bin where Z <= 0.5.
         k = np.argmax(Z <= 0.5)
         # Use linear interpolation over this bin to estimate FWHM.
-        s = 0.5 - Z[k]
+        s = (0.5 - Z[k]) / (Z[k + 1] - Z[k])
         fwhm = 2 * ((1 - s) * rangmid[k] + s * rangmid[k + 1])
         return fwhm, Z
 
