@@ -105,7 +105,8 @@ def ciproc():
                     output = path / 'GCR-{0}-{1}.fits'.format(expid, camera)
                     GCR.save(str(output))
                     if args.saveimg:
-                        plot_full_frame(D, GCR=GCR, label='{0}-{1}'.format(expid, camera))
+                        plot_full_frame(D, GCR=GCR, label='{0}-{1}'.format(expid, camera),
+                                        downsampling=args.downsampling)
                         output = path / 'FULL-{0}-{1}.png'.format(expid, camera)
                         plt.savefig(str(output))
                         plt.close('all')
