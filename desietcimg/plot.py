@@ -155,13 +155,13 @@ def plot_psf_profile(GCR, size=4, pad=0.5, inset_size=35, max_ang=2.0, label=Non
     rhs.set_xlabel('Centroid offset [arcsec]')
 
 
-def plot_full_frame(D, W=None, downsampling=4, clip_pct=0.5, dpi=100, GCR=None,
+def plot_full_frame(D, W=None, downsampling=8, clip_pct=0.5, dpi=100, GCR=None,
                     label=None, cmap='plasma_r', fg_color='w'):
     # Convert to a float32 array.
     D, W = desietcimg.util.prepare(D, W)
     # Downsample.
-    WD = desietcimg.util.downsample(D * W, downsampling=downsampling, summary=np.sum)
-    W = desietcimg.util.downsample(W, downsampling=downsampling, summary=np.sum)
+    WD = desietcimg.util.downsample(D * W, downsampling=downsampling, summary=np.sum, allow_trim=True)
+    W = desietcimg.util.downsample(W, downsampling=downsampling, summary=np.sum, allow_trim=True)
     D = np.divide(WD, W, out=np.zeros_like(WD), where=W > 0)
     # Select background pixels using sigma clipping.
     sel = W > 0 if W is not None else (slice(None), slice(None))
