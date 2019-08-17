@@ -1,9 +1,13 @@
 """Plotting utilities. Import requires matplotlib.
 """
 import numpy as np
+import scipy.signal
+
 import matplotlib.pyplot as plt
 import matplotlib.patches
 import matplotlib.cm
+
+import desietcimg.util
 
 
 def draw_ellipse(ax, x0, y0, s, g1, g2, nsigmas=1, **ellipseopts):
@@ -117,7 +121,7 @@ def plot_guide_results(GCR, size=4, pad=0.02, ellipses=True, params=True):
     return A
 
 
-def plot_psf_profile(GCR, size=4, pad=0.4, inset_size=35, max_ang=2.0):
+def plot_psf_profile(GCR, size=4, pad=0.5, inset_size=35, max_ang=2.0, label=None):
     """
     """
     assert inset_size % 2 == 1
@@ -130,14 +134,16 @@ def plot_psf_profile(GCR, size=4, pad=0.4, inset_size=35, max_ang=2.0):
     height = size
     fig = plt.figure(figsize=(width, height))
     lhs = plt.axes((0., 0., size / width, 1.))
-    rhs = plt.axes(((size + pad) / width, pad / height, (width - size) / width, (height - pad) / height))
+    rhs = plt.axes(((size + pad) / width, pad / height,
+                    (width - size - pad) / width - 0.02, (height - pad) / height - 0.02))
     plot_image(P[inset, inset], W[inset, inset], ax=lhs)
     kwargs = dict(fontsize=16, color='w', verticalalignment='center', horizontalalignment='center',
                   transform=lhs.transAxes, fontweight='bold')
     fwhm = GCR.meta['FWHM']
-    lhs.text(0.5, 0.95, 'FWHM = {0:.2f}"'.format(fwhm), **kwargs)
     ffrac = GCR.meta['FFRAC']
-    lhs.text(0.5, 0.05, 'FIBERFRAC = {0:.3f}'.format(ffrac), **kwargs)
+    lhs.text(0.5, 0.95, 'FWHM={0:.2f}"  FFRAC={1:.3f}'.format(fwhm, ffrac), **kwargs)
+    if label is not None:
+        lhs.text(0.5, 0.05, label, **kwargs)
     rfiber_pix = 0.5 * GCR.meta['FIBSIZ'] / GCR.meta['PIXSIZ']
     lhs.add_artist(plt.Circle((0, 0), rfiber_pix, fc='none', ec='r', lw=2, alpha=0.5))
 
@@ -147,3 +153,37 @@ def plot_psf_profile(GCR, size=4, pad=0.4, inset_size=35, max_ang=2.0):
     rhs.set_xlim(0., max_ang)
     rhs.legend(loc='upper right')
     rhs.set_xlabel('Centroid offset [arcsec]')
+
+
+def plot_full_frame(D, W=None, downsampling=4, clip_pct=0.5, dpi=100, GCR=None,
+                    label=None, cmap='plasma_r', fg_color='w'):
+    # Convert to a float32 array.
+    D, W = desietcimg.util.prepare(D, W)
+    # Downsample.
+    WD = desietcimg.util.downsample(D * W, downsampling=downsampling, summary=np.sum)
+    W = desietcimg.util.downsample(W, downsampling=downsampling, summary=np.sum)
+    D = np.divide(WD, W, out=np.zeros_like(WD), where=W > 0)
+    # Select background pixels using sigma clipping.
+    sel = W > 0 if W is not None else (slice(None), slice(None))
+    clipped, _, _ = scipy.stats.sigmaclip(D[sel])
+    # Subtract the clipped mean from the data.
+    bgmean = np.mean(clipped)
+    bgrms = np.std(clipped)
+    Z = np.arcsinh((D - bgmean) / bgrms)
+    vmin, vmax = np.percentile(Z.reshape(-1), (clip_pct, 100 - clip_pct))
+    ny, nx = D.shape
+    fig = plt.figure(figsize=(nx / dpi, ny / dpi), dpi=dpi, frameon=False)
+    ax = plt.axes((0, 0, 1, 1))
+    extent = [-0.5, nx * downsampling - 0.5, -0.5, ny * downsampling - 0.5]
+    ax.imshow(Z, interpolation='none', origin='lower', vmin=vmin, vmax=vmax,
+              cmap=cmap, extent=extent)
+    ax.axis('off')
+    if GCR is not None:
+        for fit, yslice, xslice in GCR.results:
+            xlo, xhi = xslice.start, xslice.stop
+            ylo, yhi = yslice.start, yslice.stop
+            ax.add_artist(plt.Rectangle((xlo, ylo), xhi - xlo, yhi - ylo,
+                                        fc='none', ec=fg_color, alpha=0.75))
+    if label is not None:
+        ax.text(0.01, 0.01 * nx / ny, label, color=fg_color, fontsize=18, transform=ax.transAxes)
+    return ax
