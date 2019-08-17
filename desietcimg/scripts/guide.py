@@ -46,6 +46,10 @@ def ciproc():
         help='stamp size to use for analysis, must be odd')
     parser.add_argument('--nsrc', type=int, default=12,
         help='number of candiate PSF sources to detect')
+    parser.add_argument('--saveimg', action='store_true',
+        help='save a downsampled full frame image showing selected stamps')
+    parser.add_argument('--downsampling', type=int, default=8,
+        help='downsampling to use for full frame images')
     parser.add_argument('--outpath', type=str, default='.',
         help='path where output files are saved')
     parser.add_argument('--db', type=str, default='db.yaml',
@@ -100,3 +104,8 @@ def ciproc():
                     path.mkdir(parents=True, exist_ok=True)
                     output = path / 'GCR-{0}-{1}.fits'.format(expid, camera)
                     GCR.save(str(output))
+                    if args.saveimg:
+                        plot_full_frame(D, GCR=GCR, label='{0}-{1}'.format(expid, camera))
+                        output = path / 'FULL-{0}-{1}.png'.format(expid, camera)
+                        plt.savefig(str(output))
+                        plt.close('all')
