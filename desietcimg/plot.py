@@ -141,14 +141,17 @@ def plot_psf_profile(GCR, size=4, pad=0.5, inset_size=35, max_ang=2.0, label=Non
                   transform=lhs.transAxes, fontweight='bold')
     fwhm = GCR.meta['FWHM']
     ffrac = GCR.meta['FFRAC']
+    xc = GCR.meta['XC']
+    yc = GCR.meta['YC']
     lhs.text(0.5, 0.95, 'FWHM={0:.2f}"  FFRAC={1:.3f}'.format(fwhm, ffrac), **kwargs)
     if label is not None:
         lhs.text(0.5, 0.05, label, **kwargs)
     rfiber_pix = 0.5 * GCR.meta['FIBSIZ'] / GCR.meta['PIXSIZ']
-    lhs.add_artist(plt.Circle((0, 0), rfiber_pix, fc='none', ec='r', lw=2, alpha=0.5))
+    lhs.add_artist(plt.Circle((xc, yc), rfiber_pix, fc='none', ec='r', lw=2, alpha=0.5))
+    lhs.plot(xc, yc, 'r+', ms=25)
 
     rhs.plot(GCR.profile_tab['rang'], GCR.profile_tab['prof'], 'k.-', label='Profile')
-    rhs.plot(GCR.fiberfrac_tab['rang'], GCR.fiberfrac_tab['frac'], 'b.-', label='Fiber Frac')
+    #rhs.plot(GCR.fiberfrac_tab['rang'], GCR.fiberfrac_tab['frac'], 'b.-', label='Fiber Frac')
     rhs.set_ylim(-0.02, 1.02)
     rhs.set_xlim(0., max_ang)
     rhs.legend(loc='upper right')

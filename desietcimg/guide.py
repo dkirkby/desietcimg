@@ -72,7 +72,7 @@ class GuideCameraAnalysis(object):
                              .format(max_offset, stamp_size))
         # Build a grid of offsets in pixels for the x >= 0 and y >=0 quadrant.
         noffset = max_offset_pix * noffset_per_pix + 1
-        self.xyoffset = np.linspace(0, +max_offset_pix, noffset)
+        xyoffset = np.linspace(0, +max_offset_pix, noffset)
         # Tabulate fiber templates for each (x,y) offset in the x >= 0 and y >= 0 quadrant.
         self.offset_template = np.empty((noffset, noffset, stamp_size, stamp_size), np.float32)
         max_rsq = (0.5 * fiber_diam_um / pixel_size_um) ** 2
@@ -80,7 +80,9 @@ class GuideCameraAnalysis(object):
         for iy in range(noffset):
             for ix in range(noffset):
                 self.offset_template[iy, ix] = desietcimg.util.make_template(
-                    stamp_size, profile, dx=self.xyoffset[ix], dy=self.xyoffset[iy], normalized=False)
+                    stamp_size, profile, dx=xyoffset[ix], dy=xyoffset[iy], normalized=False)
+        # Save a grid of offsets in pixels covering all quadrants.
+        self.xyoffset = np.linspace(-max_offset_pix, +max_offset_pix, 2 * noffset - 1)
         # Initialize primary fitter.
         self.fitter = desietcimg.fit.GaussFitter(stamp_size)
         # Initialize a slower secondary fitter for when the primary fitter fails to converge.
@@ -271,12 +273,16 @@ class GuideCameraAnalysis(object):
             # Calcualte the fiber acceptance on a grid of (x,y) centroid offsets.
             fiberfrac = self.calculate_fiberfrac(profile)
             meta['FFRAC'] = np.max(fiberfrac)
-            #fwhm, circularized = self.calculate_fwhm(profile)
-            meta['FWHM'] = -1.
-            #self.profile_tab['prof'] = circularized
+            fwhm, circularized, xc, yc = self.calculate_fwhm(profile, fiberfrac)
+            meta['FWHM'] = fwhm
+            meta['XC'] = xc
+            meta['YC'] = yc
+            self.profile_tab['prof'] = circularized
         else:
             meta['FFRAC'] = -1.
             meta['FWHM'] = -1.
+            meta['XC'] = 0.
+            meta['YC'] = 0.
             profile = np.zeros_like(self.stamps[0][0]), np.zeros_like(self.stamps[0][0])
             self.profile_tab['prof'] = 0.
         if verbose:
@@ -348,7 +354,6 @@ class GuideCameraAnalysis(object):
             WPsum += W * (D - b) * f
             Wsum += f ** 2 * W
         P = np.divide(WPsum, Wsum, out=np.zeros_like(Wsum), where=Wsum > 0)
-        Wsum[5, 5] = 0.
         if np.any(Wsum == 0):
             # Interpolate neighboring pixels.
             K = np.identity(3, dtype=np.float32)
@@ -360,19 +365,30 @@ class GuideCameraAnalysis(object):
             Wsum[sel] = Wconv[sel]
         return P, Wsum
 
-    def calculate_fwhm(self, profile, nmax=3, nbins=25):
+    def calculate_fwhm(self, profile, fiberfrac):
+        """ Tabulate the circularized 1D PSF profile and calculate its FWHM.
+        """
+        # Locate the center of the profile.
+        iy, ix = np.unravel_index(np.argmax(fiberfrac), fiberfrac.shape)
+        xc = self.xyoffset[ix]
+        yc = self.xyoffset[iy]
+        # Calculate the radius of each pixel in arcsecs relative to this center.
+        rangle = np.hypot((self.xgrid - xc) * self.pixel_size_um / self.plate_scales[0],
+                          (self.ygrid - yc) * self.pixel_size_um / self.plate_scales[1]).reshape(-1)
+        # Fill ivar-weighted histograms of flux versus angular radius.
         P, W = profile
-        rangmid = self.profile_tab['rang']
-        WZ, _ = np.histogram(self.rang_pix, bins=self.angbins, weights=(P * W).reshape(-1))
-        W, _ = np.histogram(self.rang_pix, bins=self.angbins, weights=W.reshape(-1))
+        WZ, _ = np.histogram(rangle, bins=self.angbins, weights=(P * W).reshape(-1))
+        W, _ = np.histogram(rangle, bins=self.angbins, weights=W.reshape(-1))
+        # Calculate the circularized profile, normalized to 1 at (xc, yc).
         Z = np.divide(WZ, W, out=np.zeros_like(W), where=W > 0)
         Z /= Z[0]
         # Find the first bin where Z <= 0.5.
         k = np.argmax(Z <= 0.5)
         # Use linear interpolation over this bin to estimate FWHM.
         s = (0.5 - Z[k]) / (Z[k + 1] - Z[k])
+        rangmid = self.profile_tab['rang']
         fwhm = 2 * ((1 - s) * rangmid[k] + s * rangmid[k + 1])
-        return fwhm, Z
+        return fwhm, Z, xc, yc
 
     def calculate_fiberfrac(self, profile):
         """ Tabulate the fiber acceptance fraction on a grid of centroid offsets.
