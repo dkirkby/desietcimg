@@ -2,6 +2,7 @@ import functools
 import os.path
 
 import numpy as np
+import scipy.signal
 
 import fitsio
 
@@ -347,6 +348,16 @@ class GuideCameraAnalysis(object):
             WPsum += W * (D - b) * f
             Wsum += f ** 2 * W
         P = np.divide(WPsum, Wsum, out=np.zeros_like(Wsum), where=Wsum > 0)
+        Wsum[5, 5] = 0.
+        if np.any(Wsum == 0):
+            # Interpolate neighboring pixels.
+            K = np.identity(3, dtype=np.float32)
+            K[1, 1] = 0.
+            WPconv = scipy.signal.convolve(Wsum * P, K, mode='same')
+            Wconv = scipy.signal.convolve(Wsum, K, mode='same')
+            sel = Wsum == 0
+            P[sel] = np.divide(WPconv[sel], Wconv[sel], out=np.zeros(np.count_nonzero(sel)), where=Wconv[sel] > 0)
+            Wsum[sel] = Wconv[sel]
         return P, Wsum
 
     def calculate_fwhm(self, profile, nmax=3, nbins=25):
