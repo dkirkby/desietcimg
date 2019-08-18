@@ -72,10 +72,8 @@ class GuideCameraAnalysis(object):
         # Build a grid of offsets in pixels for the x >= 0 and y >=0 quadrant.
         noffset = max_offset_pix * noffset_per_pix + 1
         self.xyoffset = np.linspace(0, +max_offset_pix, noffset)
-        print(self.xyoffset)
         # Tabulate fiber templates for each (x,y) offset in the x >= 0 and y >= 0 quadrant.
         self.offset_template = np.empty((noffset, noffset, stamp_size, stamp_size), np.float32)
-        print(self.offset_template.nbytes / (1 << 20))
         max_rsq = (0.5 * fiber_diam_um / pixel_size_um) ** 2
         profile = lambda x, y: 1.0 * (x ** 2 + y ** 2 < max_rsq)
         for iy in range(noffset):
@@ -201,7 +199,6 @@ class GuideCameraAnalysis(object):
                 WDf[changed], Wf[changed], out=filtered[changed], where=Wf[changed] > 0)
 
             # Calculate the change in the filtered value after the masking.
-            # We can assume that the denominator is non-zero here.
             wsum = np.sum(ivar * self.PSF0)
             fnew = 0
             if wsum > 0:
@@ -268,24 +265,24 @@ class GuideCameraAnalysis(object):
 
         results, psf = self.select_psf(results, verbose=verbose)
         if np.any(psf):
+            # Calculate the stacked PSF profile.
             profile = self.get_psf_profile(stamps, results)
-            fwhm, circularized = self.calculate_fwhm(profile)
-            meta['FWHM'] = fwhm
-            self.profile_tab['prof'] = circularized
+            # Calcualte the fiber acceptance on a grid of (x,y) centroid offsets.
             fiberfrac = self.calculate_fiberfrac(profile)
-            meta['FFRAC'] = fiberfrac[0] if np.isfinite(fiberfrac[0]) else 0.
-            self.fiberfrac_tab['frac'] = fiberfrac
+            meta['FFRAC'] = np.max(fiberfrac)
+            #fwhm, circularized = self.calculate_fwhm(profile)
+            meta['FWHM'] = -1.
+            #self.profile_tab['prof'] = circularized
         else:
+            meta['FFRAC'] = -1.
             meta['FWHM'] = -1.
             profile = np.zeros_like(self.stamps[0][0]), np.zeros_like(self.stamps[0][0])
             self.profile_tab['prof'] = 0.
-            meta['FFRAC'] = -1.
-            self.fiberfrac_tab['frac'] = 0.
         if verbose:
             print('  NPSF = {0} FWHM = {1:.2f}" FIBERFRAC = {2:.3f}'.format(
                 np.count_nonzero(psf), meta['FWHM'], meta['FFRAC']))
 
-        return GuideCameraResults(stamps, results, profile, self.profile_tab, self.fiberfrac_tab, meta)
+        return GuideCameraResults(stamps, results, profile, fiberfrac, self.profile_tab, meta)
 
     def  select_psf(self, results, smin=2.0, gmax=0.25, rmax=2.0, dsmax=1.5, dgmax=0.10, nbright=5, verbose=False):
         """Select the PSF-like sources.
@@ -367,24 +364,44 @@ class GuideCameraAnalysis(object):
         return fwhm, Z
 
     def calculate_fiberfrac(self, profile):
+        """ Tabulate the fiber acceptance fraction on a grid of centroid offsets.
+        """
+        # We only use the stacked profile for now.  Should revisit this to better
+        # handle cases where some pixels are masked (W = 0) in the stack.
         P, W = profile
-        noffset = len(self.offset_fiber)
-        fiberfrac = np.zeros(noffset)
         Psum = np.sum(P)
-        for k in range(noffset):
-            fiberfrac[k] = np.sum(P * self.offset_fiber[k]) / Psum
+        # Prepare the array of fiber fractions for offsets in all 4 quadrants.
+        nquad = len(self.offset_template)
+        nfull = 2 * nquad - 1
+        fiberfrac = np.zeros((nfull, nfull), np.float32)
+        # Loop over offsets in the x >= 0 and y >= 0 quadrant.
+        origin = nquad - 1
+        reverse = slice(None, None, -1)
+        for iy in range(nquad):
+            for ix in range(nquad):
+                T = self.offset_template[iy, ix]
+                fiberfrac[origin + iy, origin + ix] = np.sum(P * T) / Psum
+                if iy > 0:
+                    # Calculate in the x >= 0 and y < 0 quadrant.
+                    fiberfrac[origin - iy, origin + ix] = np.sum(P * T[reverse, :]) / Psum
+                if ix > 0:
+                    # Calculate in the x < 0 and y >= 0 quadrant.
+                    fiberfrac[origin + iy, origin - ix] = np.sum(P * T[:, reverse]) / Psum
+                if iy > 0 and ix > 0:
+                    # Calculate in the x < 0 and y < 0 quadrant.
+                    fiberfrac[origin - iy, origin - ix] = np.sum(P * T[reverse, reverse]) / Psum
         return fiberfrac
 
 
 class GuideCameraResults(object):
     """Container for guide camera analysis results.
     """
-    def __init__(self, stamps, results, profile, profile_tab, fiberfrac_tab, meta):
+    def __init__(self, stamps, results, profile, fiberfrac, profile_tab, meta):
         self.stamps = stamps
         self.results = results
         self.profile = profile
+        self.fiberfrac = fiberfrac
         self.profile_tab = profile_tab
-        self.fiberfrac_tab = fiberfrac_tab
         self.meta = meta
 
     def print(self):
@@ -424,9 +441,10 @@ class GuideCameraResults(object):
                 hdus.write(np.stack(self.stamps[k]), header=hdr, extname='SRC{0}'.format(k))
             # Write the profile.
             hdus.write(np.stack(self.profile), extname='PROFILE')
+            # Write the fiberfraction values.
+            hdus.write(self.fiberfrac, extname='FFRAC')
             # Write the tabulated data.
             hdus.write(self.profile_tab, extname='PROFTAB')
-            hdus.write(self.fiberfrac_tab, extname='FRACTAB')
 
     @staticmethod
     def load(name):
@@ -449,8 +467,7 @@ class GuideCameraResults(object):
                 stamps.append((data[0].copy(), data[1].copy()))
             data = hdus['PROFILE'].read()
             profile = (data[0].copy(), data[1].copy())
+            fiberfrac = hdus['FFRAC'].read().copy()
             # Read the tabulated data.
-            profile_tab = hdus['PROFTAB'].read()
-            fiberfrac_tab = hdus['FRACTAB'].read()
-            fiberfrac_tab = hdus['FRACTAB'].read()
-            return GuideCameraResults(stamps, results, profile, profile_tab, fiberfrac_tab, meta)
+            profile_tab = hdus['PROFTAB'].read().copy()
+            return GuideCameraResults(stamps, results, profile, fiberfrac, profile_tab, meta)
