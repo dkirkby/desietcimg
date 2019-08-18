@@ -33,9 +33,13 @@ class GuideCameraAnalysis(object):
         PSF-like sources.
     nangbins : int
         Number of angular bins to use for FWHM and fiber fraction calculations.
+    max_offset : float
+        Maximum centroid offset in arcseconds to consider.
+    noffset_per_pix : int
+        Number of centroid offsets per pixel width to consider.
     """
     def __init__(self, stamp_size=65, fiber_diam_um=107., pixel_size_um=9, plate_scales=(70., 76.),
-                 match_fwhm_arcsec=1.1, nangbins=40):
+                 match_fwhm_arcsec=1.1, nangbins=40, max_offset=2.0, noffset_per_pix=2):
         assert stamp_size % 2 == 1
         self.rsize = stamp_size // 2
         self.stamp_size = stamp_size
@@ -50,26 +54,34 @@ class GuideCameraAnalysis(object):
         dxy = np.arange(stamp_size) - 0.5 * (stamp_size - 1)
         self.xgrid, self.ygrid = np.meshgrid(dxy, dxy, sparse=False)
         # Calculate coordinates of pixel centers in arcsecs.
-        xang = self.xgrid * self.pixel_size_um / self.plate_scales[0]
-        yang = self.ygrid * self.pixel_size_um / self.plate_scales[1]
-        self.rang_pix = np.hypot(xang, yang).reshape(-1)
+        self.xang_pix = self.xgrid * self.pixel_size_um / self.plate_scales[0]
+        self.yang_pix = self.ygrid * self.pixel_size_um / self.plate_scales[1]
+        self.rang_pix = np.hypot(self.xang_pix, self.yang_pix).reshape(-1)
         # Specify angular binning for profile and FWHM calculations.
         rmax = dxy[-1] * self.pixel_size_um / max(self.plate_scales)
         self.angbins = np.linspace(0., rmax, nangbins + 1)
         self.profile_tab = np.zeros(nangbins, dtype=[('rang', np.float32), ('prof', np.float32)])
         self.profile_tab['rang'] = 0.5 * (self.angbins[1:] + self.angbins[:-1])
-        # Prepare fiberloss calculations.
-        noffset = 21
-        offsets = np.linspace(0., 2., noffset)
-        self.offset_fiber = np.empty((noffset, stamp_size, stamp_size))
-        profile = functools.partial(
-            desietcimg.util.fiber_profile, r0=0.5 * fiber_diam_um / pixel_size_um, blur=0.1)
-        for k, offset in enumerate(offsets):
-            dx = offset * plate_scales[0] / pixel_size_um
-            self.offset_fiber[k] = desietcimg.util.make_template(
-                stamp_size, profile, dx=dx, normalized=False)
-        self.fiberfrac_tab = np.zeros(noffset, dtype=[('rang', np.float32), ('frac', np.float32)])
-        self.fiberfrac_tab['rang'] = offsets
+        # Calculate the maximum centroid offset that keeps the fiber within the stamp.
+        max_offset_contained = int(np.floor(0.5 * (stamp_size - fiber_diam_um / pixel_size_um)))
+        # Calculate the requested maximum centroid offset in pixels.
+        max_offset_pix = int(np.ceil(max_offset * max(plate_scales) / pixel_size_um))
+        if max_offset_pix > max_offset_contained:
+            raise ValueError('max_offset = {0}" is not fully contained within stamp_size = {1}.'
+                             .format(max_offset, stamp_size))
+        # Build a grid of offsets in pixels for the x >= 0 and y >=0 quadrant.
+        noffset = max_offset_pix * noffset_per_pix + 1
+        self.xyoffset = np.linspace(0, +max_offset_pix, noffset)
+        print(self.xyoffset)
+        # Tabulate fiber templates for each (x,y) offset in the x >= 0 and y >= 0 quadrant.
+        self.offset_template = np.empty((noffset, noffset, stamp_size, stamp_size), np.float32)
+        print(self.offset_template.nbytes / (1 << 20))
+        max_rsq = (0.5 * fiber_diam_um / pixel_size_um) ** 2
+        profile = lambda x, y: 1.0 * (x ** 2 + y ** 2 < max_rsq)
+        for iy in range(noffset):
+            for ix in range(noffset):
+                self.offset_template[iy, ix] = desietcimg.util.make_template(
+                    stamp_size, profile, dx=self.xyoffset[ix], dy=self.xyoffset[iy], normalized=False)
         # Initialize primary fitter.
         self.fitter = desietcimg.fit.GaussFitter(stamp_size)
         # Initialize a slower secondary fitter for when the primary fitter fails to converge.
