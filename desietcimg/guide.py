@@ -343,7 +343,7 @@ class GuideCameraAnalysis(object):
             fit['psf'] = bool(psf[k])
         return results, psf
 
-    def get_psf_profile(self, stamps, results):
+    def get_psf_profile(self, stamps, results, threshold=0.01, verbose=False):
         """Stack PSF-like detected sources to estimate the normalized PSF profile.
         """
         WPsum = np.zeros((self.stamp_size, self.stamp_size))
@@ -356,15 +356,22 @@ class GuideCameraAnalysis(object):
             WPsum += W * (D - b) * f
             Wsum += f ** 2 * W
         P = np.divide(WPsum, Wsum, out=np.zeros_like(Wsum), where=Wsum > 0)
-        if np.any(Wsum == 0):
-            # Interpolate neighboring pixels.
-            K = np.identity(3, dtype=np.float32)
-            K[1, 1] = 0.
-            WPconv = scipy.signal.convolve(Wsum * P, K, mode='same')
-            Wconv = scipy.signal.convolve(Wsum, K, mode='same')
-            sel = Wsum == 0
-            P[sel] = np.divide(WPconv[sel], Wconv[sel], out=np.zeros(np.count_nonzero(sel)), where=Wconv[sel] > 0)
-            Wsum[sel] = Wconv[sel]
+        if threshold is not None:
+            # Use interoplation to replace non-informative pixels.
+            # This is useful for measurements that do not the ivar weights.
+            noninformative = (Wsum <= threshold * np.median(Wsum))
+            if np.any(noninformative):
+                # Interpolate neighboring pixels.
+                K = np.identity(3, dtype=np.float32)
+                K[1, 1] = 0.
+                WPconv = scipy.signal.convolve(Wsum * P, K, mode='same')
+                Wconv = scipy.signal.convolve(Wsum, K, mode='same')
+                P[noninformative] = np.divide(
+                    WPconv[noninformative], Wconv[noninformative],
+                    out=np.zeros(np.count_nonzero(noninformative)), where=Wconv[noninformative] > 0)
+                Wsum[noninformative] = Wconv[noninformative]
+            if verbose:
+                print('Interpolated {0} non-informative pixels.'.format(np.count_nonzero(noninformative)))
         return P, Wsum
 
     def calculate_fwhm(self, profile, fiberfrac):
