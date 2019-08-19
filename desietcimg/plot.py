@@ -149,13 +149,26 @@ def plot_psf_profile(GCR, size=4, pad=0.5, inset_size=35, max_ang=2.0, label=Non
     rfiber_pix = 0.5 * GCR.meta['FIBSIZ'] / GCR.meta['PIXSIZ']
     lhs.add_artist(plt.Circle((xc, yc), rfiber_pix, fc='none', ec='r', lw=2, alpha=0.5))
     lhs.plot(xc, yc, 'r+', ms=25)
-
-    rhs.plot(GCR.profile_tab['rang'], GCR.profile_tab['prof'], 'k.-', label='Profile')
-    #rhs.plot(GCR.fiberfrac_tab['rang'], GCR.fiberfrac_tab['frac'], 'b.-', label='Fiber Frac')
+    lhs.plot([xc, h2], [yc, yc], 'r--')
+    lhs.plot([xc, xc], [yc, h2], 'r:')
+    # Plot the circularized radial profile.
+    rhs.plot(GCR.profile_tab['rang'], GCR.profile_tab['prof'], 'k-', label='Circ. Profile')
+    # Plot the fiber acceptance fraction for centroid offsets along +x and +y.
+    noffset = len(GCR.fiberfrac)
+    noffset_per_pix = GCR.meta.get('NOFFPX', 2)
+    dxy_pix = (np.arange(noffset) - 0.5 * (noffset - 1)) / noffset_per_pix
+    pixel_size_um = GCR.meta['PIXSIZ']
+    plate_scales = (GCR.meta['XSCALE'], GCR.meta['YSCALE'])
+    dx_ang = (dxy_pix - xc) * pixel_size_um / plate_scales[0]
+    dy_ang = (dxy_pix - yc) * pixel_size_um / plate_scales[0]
+    iy, ix = np.unravel_index(np.argmax(GCR.fiberfrac), GCR.fiberfrac.shape)
+    rhs.plot(dx_ang[ix:], GCR.fiberfrac[iy, ix:], 'r--', label='Fiber Frac (x)')
+    rhs.plot(dx_ang[iy:], GCR.fiberfrac[iy:, ix], 'r:', label='Fiber Frac (y)')
     rhs.set_ylim(-0.02, 1.02)
     rhs.set_xlim(0., max_ang)
+    rhs.grid()
     rhs.legend(loc='upper right')
-    rhs.set_xlabel('Centroid offset [arcsec]')
+    rhs.set_xlabel('Offset from PSF center [arcsec]')
 
 
 def plot_full_frame(D, W=None, downsampling=8, clip_pct=0.5, dpi=100, GCR=None,

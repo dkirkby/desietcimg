@@ -47,6 +47,7 @@ class GuideCameraAnalysis(object):
         self.plate_scales = plate_scales
         self.fiber_diam_um = fiber_diam_um
         self.pixel_size_um = pixel_size_um
+        self.noffset_per_pix = noffset_per_pix
         # Build a nominal PSF model for detection matching.
         profile = functools.partial(moffat_profile, fwhm=match_fwhm_arcsec,
                                     sx=plate_scales[0] / pixel_size_um, sy=plate_scales[1] / pixel_size_um)
@@ -134,6 +135,7 @@ class GuideCameraAnalysis(object):
         meta['PIXSIZ'] = self.pixel_size_um
         meta['XSCALE'] = self.plate_scales[0]
         meta['YSCALE'] = self.plate_scales[1]
+        meta['NOFFPX'] = noffset_per_pix
         # Mask the most obvious defects in the whole image with a very loose chisq cut.
         W, nmasked = desietcimg.util.mask_defects(D, W, chisq_max=1e4, min_neighbors=7, inplace=True)
         if verbose:
