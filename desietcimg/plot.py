@@ -29,11 +29,17 @@ def plot_image(D, W=None, ax=None, cmap='viridis', masked_color='chocolate'):
     if W is not None and np.any(W == 0):
         D = D.copy()
         D[W == 0] = np.nan
+    if W is not None:
+        # Ignore pixels with low ivar for setting color scale limits.
+        informative = W > 0.1 * np.median(W)
+    else:
+        informative = np.ones_like(D, bool)
+    vmin, vmax = np.percentile(D[informative], (0, 100))
     ax = ax or plt.gca()
     cmap = matplotlib.cm.get_cmap(cmap)
     cmap.set_bad(color=masked_color)
     h, w = D.shape
-    I = ax.imshow(D, interpolation='none', origin='lower', cmap=cmap,
+    I = ax.imshow(D, interpolation='none', origin='lower', cmap=cmap, vmin=vmin, vmax=vmax,
                   extent=[-0.5 * w, 0.5 * w, -0.5 * h, 0.5 * h])
     ax.axis('off')
     return ax
