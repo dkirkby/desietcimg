@@ -293,7 +293,8 @@ class GuideCameraAnalysis(object):
 
         return GuideCameraResults(stamps, results, profile, fiberfrac, self.profile_tab, meta)
 
-    def  select_psf(self, results, smin=2.0, gmax=0.25, rmax=2.0, dsmax=1.5, dgmax=0.10, nbright=5, verbose=False):
+    def  select_psf(self, results, smin=2.0, gmax=0.25, rmax=2.0, snrmin=30.,
+                    dsmax=1.5, dgmax=0.10, nbright=5, verbose=False):
         """Select the PSF-like sources.
 
         Results are stored as a boolean in the 'psf' attribute.
@@ -310,8 +311,8 @@ class GuideCameraAnalysis(object):
             gvec[k] = np.hypot(fit['g1'], fit['g2'])
             rvec[k] = np.hypot(fit['x0'], fit['y0'])
             snrvec[k] = fit['snr']
-        # Identify the PSF candidates with loose cuts to reject cosmics.
-        cand = (svec > smin) & (gvec < gmax) & (rvec < rmax)
+        # Identify the PSF candidates with loose cuts to reject cosmics and faint sources.
+        cand = (svec > smin) & (gvec < gmax) & (rvec < rmax) & (snrvec > snrmin)
         if verbose:
             print('Rejected stamps: {0}'.format(np.where(~cand)[0]))
         psf = np.zeros_like(cand)
