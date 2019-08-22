@@ -25,13 +25,13 @@ def draw_ellipse(ax, x0, y0, s, g1, g2, nsigmas=1, **ellipseopts):
     ax.add_artist(ellipse)
 
 
-def plot_image(D, W=None, ax=None, cmap='viridis', masked_color='chocolate'):
+def plot_image(D, W=None, ax=None, cmap='viridis', masked_color='chocolate', threshold=0.01):
     if W is not None and np.any(W == 0):
         D = D.copy()
         D[W == 0] = np.nan
     if W is not None:
         # Ignore pixels with low ivar for setting color scale limits.
-        informative = W > 0.1 * np.median(W)
+        informative = W > threshold * np.median(W)
     else:
         informative = np.ones_like(D, bool)
     vmin, vmax = np.percentile(D[informative], (0, 100))
