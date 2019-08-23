@@ -7,7 +7,7 @@ import scipy.special
 import desietcimg.fit
 
 
-class Calibrator(object):
+class CalibrationAnalysis(object):
     
     ZERO_MASK = 0
     DARK_MASK = 1

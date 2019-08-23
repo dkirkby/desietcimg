@@ -16,6 +16,7 @@ setup(
         'console_scripts': [
             'simskycam=desietcimg.scripts.sky:simulate',
             'ciproc=desietcimg.scripts.guide:ciproc',
+            'etccalib=desietcimg.scripts.calib:etccalib',
         ],
     }
 )
