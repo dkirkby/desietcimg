@@ -211,13 +211,21 @@ def plot_full_frame(D, W=None, downsampling=8, clip_pct=0.5, dpi=100, GCR=None,
     return ax
 
 
-def plot_calib(CA, what='bias', downsampling=4, dpi=100):
+def plot_calib(CA, what='bias', downsampling=4, cmap='viridis', masked_color='chocolate', dpi=100):
     ny, nx = CA.shape
     fig = plt.figure(figsize=(nx / downsampling / dpi, ny / downsampling / dpi), dpi=dpi, frameon=False)
     ax = plt.axes((0, 0, 1, 1))
     ax.axis('off')
+    cmap = matplotlib.cm.get_cmap(cmap)
+    cmap.set_bad(color=masked_color)
     if what == 'bias':
-        D = desietcimg.util.downsample(CA.pixbias, downsampling, np.mean)
-        ax.imshow(D, vmin=1000., vmax=1020., interpolation='none', origin='lower')
+        D = CA.pixbias.copy()
+        W = np.array(CA.pixmask == 0).astype(np.float32)
+        WDds = desietcimg.util.downsample(D * W, downsampling, np.sum)
+        Wds = desietcimg.util.downsample(W, downsampling, np.sum)
+        Dds = np.divide(WDds, Wds, out=np.zeros_like(WDds), where=Wds > 0)
+        vmin, vmax = np.percentile(Dds[Wds > 0], (0.5, 99.5))
+        Dds[Wds <= 0] = np.nan
+        ax.imshow(Dds, interpolation='none', origin='lower', cmap=cmap)
     elif what == 'mask':
         ax.imshow(CA.pixmask, interpolation='none', origin='lower')
