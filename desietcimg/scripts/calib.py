@@ -151,4 +151,4 @@ def etccalib():
             for k, (hdus, hdr, row) in enumerate(CIfiles(dark_exps)):
                 raw[k] = hdus[camera].read()
             CA.process_darks(raw, verbose=args.verbose)
-            CA.save(str(outpath / 'ci-calib-{0}-{1}.fits'.format(night, camera)))
+            CA.save(str(outpath / 'ci-calib-{0}-{1}.fits'.format(args.ci_night, camera)))
