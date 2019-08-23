@@ -94,7 +94,9 @@ class CalibrationAnalysis(object):
         with fitsio.FITS(name, 'rw', clobber=overwrite) as hdus:
             # Write a primary HDU with only the metadata.
             meta = dict(
-                CAMERA=self.name,
+                NAME=self.name,
+                NY=self.shape[0],
+                NX=self.shape[1],
                 AVGBIAS=self.avgbias,
                 RDNOISE=self.rdnoise,
                 AVGDARK=self.avgdark,
@@ -106,6 +108,22 @@ class CalibrationAnalysis(object):
             # Write the pixel biases.
             hdus.write(self.pixbias, extname='BIAS')
             hdus.write(self.pixmu, extname='MU')
+
+    @staticmethod
+    def load(name):
+        """Restore results previously written by :meth:`save`.
+        """
+        with fitsio.FITS(name, 'r') as hdus:
+            meta = hdus[0].read_header()
+            CA = CalibrationAnalysis(meta['NAME'], meta['NY'], meta['NX'])
+            CA.avgbias = meta['AVGBIAS']
+            CA.rdnoise = meta['RDNOISE']
+            CA.avgdark = meta['AVGDARK']
+            CA.stddark = meta['STDDARK']
+            CA.pixmask[:] = hdus['MASK'].read()
+            CA.pixbias = hdus['BIAS'].read().copy()
+            CA.pixmu = hdus['MU'].read().copy()
+            return CA
 
     def fit_pedestal(self, raw, nsiglo=3, nsighi=1, verbose=True):
         """
