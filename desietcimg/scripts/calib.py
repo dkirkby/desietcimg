@@ -139,13 +139,13 @@ def etccalib():
         cameras = 'CIN', 'CIE', 'CIS', 'CIW', 'CIC'
         for camera in cameras:
             CA = CalibrationAnalysis(camera, 2048, 3072)
-            if verbose:
+            if args.verbose:
                 print('Loading {0} zero frames...'.format(camera))
             raw = np.empty((nzero,) + CA.shape, np.uint16)
             for k, (hdus, hdr, row) in enumerate(CIfiles(zero_exps)):
                 raw[k] = hdus[camera].read()
             CA.process_zeros(raw, refine=False, verbose=args.verbose)
-            if verbose:
+            if args.verbose:
                 print('Loading {0} dark frames...'.format(camera))
             raw = np.empty((ndark,) + CA.shape, np.uint16)
             for k, (hdus, hdr, row) in enumerate(CIfiles(dark_exps)):
