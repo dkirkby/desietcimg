@@ -100,7 +100,7 @@ class CalibrationAnalysis(object):
                 AVGDARK=self.avgdark,
                 STDDARK=self.stddark,
             )
-            hdus.write(np.zeros((1,), dtype=np.float32), header=self.meta)
+            hdus.write(np.zeros((1,), dtype=np.float32), header=meta)
             # Write the pixel mask.
             hdus.write(self.pixmask, extname='MASK')
             # Write the pixel biases.
