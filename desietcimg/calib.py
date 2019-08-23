@@ -4,6 +4,8 @@ import numpy as np
 
 import scipy.special
 
+import fitsio
+
 import desietcimg.fit
 
 
@@ -18,11 +20,11 @@ class CalibrationAnalysis(object):
         self.pixmask = np.zeros(self.shape, np.uint8)
         self.fitter = desietcimg.fit.CalibFitter()
         self.reset()
-        
+
     def reset(self):
         self.pixmask[:] = 0
         self.have_zeros = False
-        
+
     def validate(self, raw):
         if raw.dtype != np.uint16:
             raise ValueError('Raw data must be uint16.')
@@ -32,10 +34,10 @@ class CalibrationAnalysis(object):
             raise ValueError('Raw data has shape {0} but expected {1}.'
                              .format((ny, nx), self.shape))
         return nexp, maxval
-        
+
     def process_zeros(self, raw, refine='auto', verbose=True):
         """Process a sequence of zero-length exposures to estimate bias and readnoise.
-        
+
         Parameters
         ----------
         raw : array
@@ -55,7 +57,7 @@ class CalibrationAnalysis(object):
             print('== {0} zeros analysis:'.format(self.name))
         self.fitok, self.avgbias, self.rdnoise = self.fit_pedestal(raw, verbose=verbose)
         mask, self.pixbias = self.mask_defects(raw, self.avgbias, self.rdnoise, verbose=verbose)
-        self.pixmask |= (1 << Calibrator.ZERO_MASK)
+        self.pixmask |= (1 << CalibrationAnalysis.ZERO_MASK)
         if refine == 'auto':
             refine = self.rdnoise / np.sqrt(len(raw)) < np.std(self.pixbias)
         if refine:
@@ -73,8 +75,8 @@ class CalibrationAnalysis(object):
             print('== {0} darks analysis:'.format(self.name))
         self.fitok, self.avgdark, self.stddark = self.fit_pedestal(raw, verbose=verbose)
         mask, self.pixmu = self.mask_defects(raw, self.avgdark, self.stddark, verbose=verbose)
-        self.pixmask |= (1 << Calibrator.DARK_MASK)
-        
+        self.pixmask |= (1 << CalibrationAnalysis.DARK_MASK)
+
         if self.stddark <= self.rdnoise:
             if verbose:
                 print('Unable to determine gain since std(dark) < std(zero).')
@@ -84,6 +86,27 @@ class CalibrationAnalysis(object):
         gain = (self.avgdark - self.avgbias) / (self.stddark ** 2 - self.rdnoise ** 2)
         print('gain', gain)
 
+    def save(self, name, overwrite=True):
+        """
+        """
+        if not overwrite and os.path.exists(name):
+            raise RuntimeError('File exists and overwrite is False: {0}.'.format(name))
+        with fitsio.FITS(name, 'rw', clobber=overwrite) as hdus:
+            # Write a primary HDU with only the metadata.
+            meta = dict(
+                CAMERA=self.name,
+                AVGBIAS=self.avgbias,
+                RDNOISE=self.rdnoise,
+                AVGDARK=self.avgdark,
+                STDDARK=self.stddark,
+            )
+            hdus.write(np.zeros((1,), dtype=np.float32), header=self.meta)
+            # Write the pixel mask.
+            hdus.write(self.pixmask, extname='MASK')
+            # Write the pixel biases.
+            hdus.write(self.pixbias, extname='BIAS')
+            hdus.write(self.pixmu, extname='MU')
+
     def fit_pedestal(self, raw, nsiglo=3, nsighi=1, verbose=True):
         """
         """
@@ -92,7 +115,7 @@ class CalibrationAnalysis(object):
         # Histogram the raw pixel values.
         pixhist = np.bincount(raw.reshape(-1), minlength=maxval)
         ntot = np.sum(pixhist)
-        
+
         # Find the mode of the pixel value distribution.
         mode = np.argmax(pixhist)
 
@@ -112,16 +135,16 @@ class CalibrationAnalysis(object):
                   .format(mu, std, 100 * ntot / raw.size))
             print('fit: {0}'.format(result.message))
         return result.success, mu, std
-        
+
     def mask_defects(self, raw, mu, std, nsig=5, verbose=True):
         """
         """
         nexp, maxval = self.validate(raw)
-        
+
         # Classify pixels more than nsig std from the mean as defects (dead / hot / cosmic).
         imin = np.uint16(max(0, int(np.floor(mu - nsig * std))))
         imax = np.uint16(min(maxval - 1, int(np.ceil(mu + nsig * std))))
-        
+
         # Loop over frames to count how often a pixel is above or below range.
         D = np.empty_like(raw[0])
         nlo = np.zeros(self.shape, np.uint16)
@@ -139,7 +162,7 @@ class CalibrationAnalysis(object):
 
         # Classify pixels that are ever lo or hi in more than 1 frame (to allow for cosmics) as defects.
         mask = (nlo > 0) | (nhi > 1)
-        
+
         if verbose:
             npix = np.prod(self.shape)
             print('defects: lo {0:.3f}% hi {1:.3f}%'
@@ -151,9 +174,9 @@ class CalibrationAnalysis(object):
         if verbose:
             print('std(pixmu)={0:.3f} ADU std(pix)/sqrt(nexp) = {1:.3f} ADU'
                   .format(np.std(pixmu[~mask]), std / np.sqrt(nexp)))
-        
+
         return mask, pixmu
-    
+
     def refine_noise(self, raw, std, mask, pixmu, verbose=True):
         """
         """
@@ -169,11 +192,11 @@ class CalibrationAnalysis(object):
             D -= pixmu
             hist, _ = np.histogram(D[~mask], bins=xedge)
             pixhist += hist
-            
+
         xpix = 0.5 * (xedge[1:] + xedge[:-1])
         plt.plot(xpix, pixhist, 'k.')
         theta0 = np.array([pixhist.sum(), 0., std])
-        
+
         result, ntot, mu, std = self.fitter.fit(-iwin, iwin + 1, pixhist, pixhist.sum(), 0., std)
         if verbose:
             print('refine: mu={0:.2f} ADU std={1:.2f} ADU frac={2:.2f}%'
@@ -184,5 +207,5 @@ class CalibrationAnalysis(object):
 
         # Correct for the variance due to noisy pixel mean estimates.
         std *= np.sqrt(1 - 1 / nexp)
-            
+
         return std

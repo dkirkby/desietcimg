@@ -115,6 +115,11 @@ def etccalib():
         help='yaml file of database connection parameters')
     args = parser.parse_args()
 
+    outpath = Path(args.outpath)
+    if not outpath.exists():
+        print('Non-existant output path: {0}.'.format(outpath))
+        sys.exit(-1)
+
     if args.ci_night > 0:
         # Initialize the online database.
         db = DB(args.db)
@@ -134,7 +139,16 @@ def etccalib():
         cameras = 'CIN', 'CIE', 'CIS', 'CIW', 'CIC'
         for camera in cameras:
             CA = CalibrationAnalysis(camera, 2048, 3072)
+            if verbose:
+                print('Loading {0} zero frames...'.format(camera))
             raw = np.empty((nzero,) + CA.shape, np.uint16)
             for k, (hdus, hdr, row) in enumerate(CIfiles(zero_exps)):
                 raw[k] = hdus[camera].read()
             CA.process_zeros(raw, refine=False, verbose=args.verbose)
+            if verbose:
+                print('Loading {0} dark frames...'.format(camera))
+            raw = np.empty((ndark,) + CA.shape, np.uint16)
+            for k, (hdus, hdr, row) in enumerate(CIfiles(dark_exps)):
+                raw[k] = hdus[camera].read()
+            CA.process_darks(raw, verbose=args.verbose)
+            CA.save(str(outpath / 'ci-calib-{0}-{1}.fits'.format(night, camera)))
