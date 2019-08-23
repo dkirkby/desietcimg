@@ -209,3 +209,15 @@ def plot_full_frame(D, W=None, downsampling=8, clip_pct=0.5, dpi=100, GCR=None,
     if label is not None:
         ax.text(0.01, 0.01 * nx / ny, label, color=fg_color, fontsize=18, transform=ax.transAxes)
     return ax
+
+
+def plot_calib(CA, what='bias', downsampling=4, dpi=100):
+    ny, nx = CA.shape
+    fig = plt.figure(figsize=(nx / downsampling / dpi, ny / downsampling / dpi), dpi=dpi, frameon=False)
+    ax = plt.axes((0, 0, 1, 1))
+    ax.axis('off')
+    if what == 'bias':
+        D = desietcimg.util.downsample(CA.pixbias, downsampling, np.mean)
+        ax.imshow(D, vmin=1000., vmax=1020., interpolation='none', origin='lower')
+    elif what == 'mask':
+        ax.imshow(CA.pixmask, interpolation='none', origin='lower')

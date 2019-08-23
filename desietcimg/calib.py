@@ -57,7 +57,7 @@ class CalibrationAnalysis(object):
             print('== {0} zeros analysis:'.format(self.name))
         self.fitok, self.avgbias, self.rdnoise = self.fit_pedestal(raw, verbose=verbose)
         mask, self.pixbias = self.mask_defects(raw, self.avgbias, self.rdnoise, verbose=verbose)
-        self.pixmask |= (1 << CalibrationAnalysis.ZERO_MASK)
+        self.pixmask[mask] |= (1 << CalibrationAnalysis.ZERO_MASK)
         if refine == 'auto':
             refine = self.rdnoise / np.sqrt(len(raw)) < np.std(self.pixbias)
         if refine:
@@ -75,7 +75,7 @@ class CalibrationAnalysis(object):
             print('== {0} darks analysis:'.format(self.name))
         self.fitok, self.avgdark, self.stddark = self.fit_pedestal(raw, verbose=verbose)
         mask, self.pixmu = self.mask_defects(raw, self.avgdark, self.stddark, verbose=verbose)
-        self.pixmask |= (1 << CalibrationAnalysis.DARK_MASK)
+        self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_MASK)
 
         if self.stddark <= self.rdnoise:
             if verbose:
