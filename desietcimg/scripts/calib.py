@@ -82,7 +82,7 @@ def CIfiles(exposure_table, verbose=False):
         expid = int(round(expid))
         night = int(round(night))
         try:
-            hdus, hdr = openCI(expid, verbose=verbose)
+            hdus, hdr = openCI(expid, night, verbose=verbose)
         except RuntimeError as e:
             print(e)
             continue
