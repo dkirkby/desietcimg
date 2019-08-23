@@ -99,7 +99,7 @@ def CIfiles(exposure_table, verbose=False):
             hdus.close()
 
 
-    def etccalib():
+def etccalib():
     parser = argparse.ArgumentParser(
         description='Analyze calibration data.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
