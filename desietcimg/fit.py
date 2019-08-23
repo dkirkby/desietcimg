@@ -157,3 +157,40 @@ class GaussFitter(object):
             print(str(e))
             result['message'] = str(e)
         return result
+
+
+class CalibFitter(object):
+    """Fit a histogram of pixel values to a single Gaussian noise model.
+    """
+    def __init__(self, optimize_args={}):
+        # Initialize the args sent to scipy.optimize.minimize()
+        self.kwargs = dict(
+            method='Nelder-Mead',
+            options=dict(maxiter=10000, xatol=1e-3, fatol=1e-3, disp=False))
+        self.kwargs.update(optimize_args)
+        
+    def predict(self, ntot, mu, std):
+        """Predict data with specified parameters and bin edges.
+        """
+        z = scipy.special.erf((self.xedge - mu) / (np.sqrt(2) * std))
+        return 0.5 * ntot * np.diff(z)
+        
+    def nll(self, theta):
+        """Objective function for minimization, calculates -logL.
+        """
+        ypred = self.predict(*theta)
+        # Use the model to predict the Gaussian inverse variances.
+        yvar = np.maximum(1, ypred)
+        return 0.5 * np.sum((self.ydata - ypred) ** 2 / yvar)
+    
+    def fit(self, ilo, ihi, ydata, ntot0, mu0, std0):
+        self.xedge = np.arange(ilo, ihi + 1) - 0.5
+        self.ydata = np.asarray(ydata, np.float)
+        theta0 = np.array([ntot0, mu0, std0], np.float)
+        result = scipy.optimize.minimize(self.nll, theta0, **self.kwargs)
+        if result.success:
+            self.yfit = self.predict(*result.x)
+            return (result,) + tuple(result.x)
+        else:
+            self.yfit = self.predict(*theta0)
+            return (result,) + tuple(theta0)
