@@ -185,6 +185,7 @@ class CalibFitter(object):
     
     def fit(self, ilo, ihi, ydata, ntot0, mu0, std0):
         self.xedge = np.arange(ilo, ihi + 1) - 0.5
+        self.xpix = 0.5 * (self.xedge[1:] + self.xedge[:-1])
         self.ydata = np.asarray(ydata, np.float)
         theta0 = np.array([ntot0, mu0, std0], np.float)
         result = scipy.optimize.minimize(self.nll, theta0, **self.kwargs)

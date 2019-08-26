@@ -107,6 +107,8 @@ def etccalib():
         help='provide verbose output on progress')
     parser.add_argument('--ci-night', type=int, default=0, metavar='YYYYMMDD',
         help='night of CI run to analyze in the format YYYYMMDD')
+    parser.add_argument('--stxl-path', type=str, default='', metavar='PATH',
+        help='path of STXL calibration files to analyze')
     parser.add_argument('--saveimg', action='store_true',
         help='save images showing calibration results')
     parser.add_argument('--outpath', type=str, default='.',
@@ -119,6 +121,32 @@ def etccalib():
     if not outpath.exists():
         print('Non-existant output path: {0}.'.format(outpath))
         sys.exit(-1)
+
+    if args.stxl_path:
+        inpath = Path(args.stxl_path)
+        if not inpath.exists():
+            raise FileNotFoundError(str(inpath))
+        CA = CalibrationAnalysis('STXL', 2047, 3072)
+        zero_paths = [str(P) for P in inpath.glob('zero_*.fits')]
+        nzero = len(zero_paths)
+        dark_paths = [str(P) for P in inpath.glob('dark_*.fits')]
+        ndark = len(dark_paths)
+        if args.verbose:
+            print('Found {0} zero and {1} dark exposures from {2}'
+                  .format(nzero, ndark, args.stxl_path))
+        raw = np.empty((nzero,) + CA.shape, np.uint16)
+        if args.verbose:
+            print('Loading zero frames...')
+        for k, name in enumerate(zero_paths):
+            raw[k] = fitsio.read(name)
+        CA.process_zeros(raw, refine=False, verbose=args.verbose)
+        raw = np.empty((ndark,) + CA.shape, np.uint16)
+        if args.verbose:
+            print('Loading dark frames...')
+        for k, name in enumerate(dark_paths):
+            raw[k] = fitsio.read(name)
+        CA.process_darks(raw, verbose=args.verbose)
+        CA.save(str(outpath / 'stxl-calib.fits'))
 
     if args.ci_night > 0:
         # Initialize the online database.
@@ -133,7 +161,7 @@ def etccalib():
             where="sequence='CI' and flavor='dark' and night={0}".format(args.ci_night))
         ndark = len(dark_exps)
         if args.verbose:
-            print('Found {0} zero and {1} dark exposures from {2}.'
+            print('Found {0} zero and {1} dark exposures from {2}'
                   .format(nzero, ndark, args.ci_night))
         # Process each camera separately. This is somewhat slower but uses 1/5 the memory.
         cameras = 'CIN', 'CIE', 'CIS', 'CIW', 'CIC'

@@ -218,11 +218,11 @@ def plot_calib(CA, what='bias', downsampling=4, cmap='viridis', masked_color='ch
     ax.axis('off')
     cmap = matplotlib.cm.get_cmap(cmap)
     cmap.set_bad(color=masked_color)
-    if what == 'bias':
-        D = CA.pixbias.copy()
+    if what in ('bias', 'mu'):
+        D = CA.pixbias.copy() if what == 'bias' else CA.pixmu.copy()
         W = np.array(CA.pixmask == 0).astype(np.float32)
-        WDds = desietcimg.util.downsample(D * W, downsampling, np.sum)
-        Wds = desietcimg.util.downsample(W, downsampling, np.sum)
+        WDds = desietcimg.util.downsample(D * W, downsampling, np.sum, allow_trim=True)
+        Wds = desietcimg.util.downsample(W, downsampling, np.sum, allow_trim=True)
         Dds = np.divide(WDds, Wds, out=np.zeros_like(WDds), where=Wds > 0)
         vmin, vmax = np.percentile(Dds[Wds > 0], (0.5, 99.5))
         Dds[Wds <= 0] = np.nan

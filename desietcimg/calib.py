@@ -55,7 +55,8 @@ class CalibrationAnalysis(object):
         """
         if verbose:
             print('== {0} zeros analysis:'.format(self.name))
-        self.fitok, self.avgbias, self.rdnoise = self.fit_pedestal(raw, verbose=verbose)
+        self.fitok, self.avgbias, self.rdnoise, self.zerodata = self.fit_pedestal(
+            raw, verbose=verbose)
         mask, self.pixbias = self.mask_defects(raw, self.avgbias, self.rdnoise, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.ZERO_MASK)
         if refine == 'auto':
@@ -73,7 +74,8 @@ class CalibrationAnalysis(object):
             raise RuntimeError('Must call process_zeros before process_darks.')
         if verbose:
             print('== {0} darks analysis:'.format(self.name))
-        self.fitok, self.avgdark, self.stddark = self.fit_pedestal(raw, verbose=verbose)
+        self.fitok, self.avgdark, self.stddark, self.darkdata = self.fit_pedestal(
+            raw, verbose=verbose)
         mask, self.pixmu = self.mask_defects(raw, self.avgdark, self.stddark, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_MASK)
 
@@ -83,8 +85,8 @@ class CalibrationAnalysis(object):
             self.gain = np.nan
             return False
 
-        gain = (self.avgdark - self.avgbias) / (self.stddark ** 2 - self.rdnoise ** 2)
-        print('gain', gain)
+        invgain = (self.stddark ** 2 - self.rdnoise ** 2) / (self.avgdark - self.avgbias)
+        print('invgain', invgain)
 
     def save(self, name, overwrite=True):
         """
@@ -108,6 +110,9 @@ class CalibrationAnalysis(object):
             # Write the pixel biases.
             hdus.write(self.pixbias, extname='BIAS')
             hdus.write(self.pixmu, extname='MU')
+            # Write tables of pedestal data.
+            hdus.write(self.zerodata, extname='ZERDAT')
+            hdus.write(self.darkdata, extname='DRKDAT')
 
     @staticmethod
     def load(name):
@@ -123,6 +128,8 @@ class CalibrationAnalysis(object):
             CA.pixmask[:] = hdus['MASK'].read()
             CA.pixbias = hdus['BIAS'].read().copy()
             CA.pixmu = hdus['MU'].read().copy()
+            CA.zerodata = hdus['ZERDAT'].read().copy()
+            CA.darkdata = hdus['DRKDAT'].read().copy()
             return CA
 
     def fit_pedestal(self, raw, nsiglo=3, nsighi=1, verbose=True):
@@ -152,7 +159,15 @@ class CalibrationAnalysis(object):
             print('fit: mu={0:.2f} ADU std={1:.2f} ADU frac={2:.2f}%'
                   .format(mu, std, 100 * ntot / raw.size))
             print('fit: {0}'.format(result.message))
-        return result.success, mu, std
+
+        # Pack the input data and best fit into a recarray.
+        pedestal_data = np.empty(len(self.fitter.xpix),
+            dtype=[('xpix', np.float32), ('ydata', np.float32), ('yfit', np.float32)])
+        pedestal_data['xpix'] = self.fitter.xpix
+        pedestal_data['ydata'] = self.fitter.ydata
+        pedestal_data['yfit'] = self.fitter.yfit
+
+        return result.success, mu, std, pedestal_data
 
     def mask_defects(self, raw, mu, std, nsig=5, verbose=True):
         """
