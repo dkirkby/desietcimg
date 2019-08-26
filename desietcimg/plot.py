@@ -211,7 +211,7 @@ def plot_full_frame(D, W=None, downsampling=8, clip_pct=0.5, dpi=100, GCR=None,
     return ax
 
 
-def plot_calib(CA, what='bias', downsampling=4, cmap='viridis', masked_color='chocolate', dpi=100):
+def plot_calib_frame(CA, what='bias', downsampling=4, cmap='viridis', masked_color='chocolate', dpi=100):
     ny, nx = CA.shape
     fig = plt.figure(figsize=(nx / downsampling / dpi, ny / downsampling / dpi), dpi=dpi, frameon=False)
     ax = plt.axes((0, 0, 1, 1))
@@ -229,3 +229,12 @@ def plot_calib(CA, what='bias', downsampling=4, cmap='viridis', masked_color='ch
         ax.imshow(Dds, interpolation='none', origin='lower', cmap=cmap)
     elif what == 'mask':
         ax.imshow(CA.pixmask, interpolation='none', origin='lower')
+
+
+def plot_calib_data(CA, what='zero'):
+    data = CA.zerodata if what == 'zero' else CA.darkdata
+    plt.plot(data['xpix'], data['ydata'], 'k.', label='Data')
+    plt.plot(data['xpix'], data['yfit'], 'b-', alpha=0.5, label='Fit')
+    plt.yticks([])
+    plt.xlabel('Pixel Value [ADU]')
+    plt.legend()

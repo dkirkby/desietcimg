@@ -139,13 +139,13 @@ def etccalib():
             print('Loading zero frames...')
         for k, name in enumerate(zero_paths):
             raw[k] = fitsio.read(name)
-        CA.process_zeros(raw, refine=False, verbose=args.verbose)
+        CA.process_zeros(raw, refine='auto', verbose=args.verbose)
         raw = np.empty((ndark,) + CA.shape, np.uint16)
         if args.verbose:
             print('Loading dark frames...')
         for k, name in enumerate(dark_paths):
             raw[k] = fitsio.read(name)
-        CA.process_darks(raw, verbose=args.verbose)
+        CA.process_darks(raw, refine='auto', verbose=args.verbose)
         CA.save(str(outpath / 'stxl-calib.fits'))
 
     if args.ci_night > 0:

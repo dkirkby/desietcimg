@@ -60,24 +60,31 @@ class CalibrationAnalysis(object):
         mask, self.pixbias = self.mask_defects(raw, self.avgbias, self.rdnoise, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.ZERO_MASK)
         if refine == 'auto':
-            refine = self.rdnoise / np.sqrt(len(raw)) < np.std(self.pixbias)
+            refine = self.rdnoise / np.sqrt(len(raw)) < np.std(self.pixbias[self.pixmask == 0])
         if refine:
-            self.rdnoise = self.refine_noise(raw, self.rdnoise, self.mask, self.pixbias, verbose=verbose)
+            self.rdnoise, self.zerodata = self.refine_noise(
+                raw, self.rdnoise, self.pixmask, self.pixbias, verbose=verbose)
             self.avgbias = np.mean(self.pixbias)
         if verbose:
             print('{0} read noise = {1:.3f} ADU avg bias = {2:.3f} ADU'
                   .format(self.name, self.rdnoise, self.avgbias))
         self.have_zeros = True
 
-    def process_darks(self, raw, verbose=True):
+    def process_darks(self, raw, refine='auto', verbose=True):
         if not self.have_zeros:
             raise RuntimeError('Must call process_zeros before process_darks.')
         if verbose:
             print('== {0} darks analysis:'.format(self.name))
         self.fitok, self.avgdark, self.stddark, self.darkdata = self.fit_pedestal(
             raw, verbose=verbose)
-        mask, self.pixmu = self.mask_defects(raw, self.avgdark, self.stddark, verbose=verbose)
+        mask, self.pixmu = self.mask_defects(raw, self.avgdark, self.stddark, nsig=50, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_MASK)
+        if refine == 'auto':
+            refine = self.stddark / np.sqrt(len(raw)) < np.std(self.pixmu[self.pixmask == 0])
+        if refine:
+            self.stddark, self.darkdata = self.refine_noise(
+                raw, self.stddark, self.pixmask, self.pixmu, verbose=verbose)
+            self.avgdark = np.mean(self.pixmu)
 
         if self.stddark <= self.rdnoise:
             if verbose:
@@ -160,14 +167,7 @@ class CalibrationAnalysis(object):
                   .format(mu, std, 100 * ntot / raw.size))
             print('fit: {0}'.format(result.message))
 
-        # Pack the input data and best fit into a recarray.
-        pedestal_data = np.empty(len(self.fitter.xpix),
-            dtype=[('xpix', np.float32), ('ydata', np.float32), ('yfit', np.float32)])
-        pedestal_data['xpix'] = self.fitter.xpix
-        pedestal_data['ydata'] = self.fitter.ydata
-        pedestal_data['yfit'] = self.fitter.yfit
-
-        return result.success, mu, std, pedestal_data
+        return result.success, mu, std, self.fitter.data
 
     def mask_defects(self, raw, mu, std, nsig=5, verbose=True):
         """
@@ -223,11 +223,10 @@ class CalibrationAnalysis(object):
         for iexp in range(nexp):
             D[:] = raw[iexp]
             D -= pixmu
-            hist, _ = np.histogram(D[~mask], bins=xedge)
+            hist, _ = np.histogram(D[mask == 0], bins=xedge)
             pixhist += hist
 
         xpix = 0.5 * (xedge[1:] + xedge[:-1])
-        plt.plot(xpix, pixhist, 'k.')
         theta0 = np.array([pixhist.sum(), 0., std])
 
         result, ntot, mu, std = self.fitter.fit(-iwin, iwin + 1, pixhist, pixhist.sum(), 0., std)
@@ -236,9 +235,7 @@ class CalibrationAnalysis(object):
                   .format(mu, std, 100 * ntot / raw.size))
             print('refine: {0}'.format(result.message))
 
-        plt.plot(xpix, self.fitter.yfit, 'r-', alpha=0.5)
-
         # Correct for the variance due to noisy pixel mean estimates.
         std *= np.sqrt(1 - 1 / nexp)
 
-        return std
+        return std, self.fitter.data
