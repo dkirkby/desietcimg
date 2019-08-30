@@ -2,6 +2,7 @@
 """
 import argparse
 import sys
+import re
 from pathlib import Path
 
 import numpy as np
@@ -99,6 +100,24 @@ def CIfiles(exposure_table, verbose=False):
             hdus.close()
 
 
+def get_files(inpath, pattern, min=None, max=None):    
+    paths = [str(P) for P in inpath.glob(pattern.format(N='*'))]
+    if min is None and max is None:
+        return paths
+    regexp = re.compile(pattern.format(N='([0-9]+)') + '$')
+    selected = []
+    for path in paths:
+        found = regexp.search(path)
+        if found:
+            seqnum = int(found.group(1))
+            if min is not None and seqnum < min:
+                continue
+            if max is not None and seqnum > max:
+                continue
+            selected.append(path)
+    return selected
+
+
 def etccalib():
     parser = argparse.ArgumentParser(
         description='Analyze calibration data.',
@@ -109,16 +128,33 @@ def etccalib():
         help='night of CI run to analyze in the format YYYYMMDD')
     parser.add_argument('--stxl-path', type=str, default='', metavar='PATH',
         help='path of STXL calibration files to analyze')
-    parser.add_argument('--saveimg', action='store_true',
-        help='save images showing calibration results')
+    parser.add_argument('--zero-min', type=int, default=None, metavar='N',
+        help='only use zero exposures with sequence number >= N')
+    parser.add_argument('--zero-max', type=int, default=None, metavar='N',
+        help='only use zero exposures with sequence number <= N')
+    parser.add_argument('--dark-min', type=int, default=None, metavar='N',
+        help='only use dark exposures with sequence number >= N')
+    parser.add_argument('--dark-max', type=int, default=None, metavar='N',
+        help='only use dark exposures with sequence number <= N')
+    parser.add_argument('--flat-min', type=int, default=None, metavar='N',
+        help='only use flat exposures with sequence number >= N')
+    parser.add_argument('--flat-max', type=int, default=None, metavar='N',
+        help='only use flat exposures with sequence number <= N')
     parser.add_argument('--outpath', type=str, default='.',
         help='path where output files are saved')
+    parser.add_argument('--binning', type=int, choices=(1, 2, 3), default=1, metavar='B',
+        help='binning of STXL exposures')
     parser.add_argument('--db', type=str, default='db.yaml',
         help='yaml file of database connection parameters')
     args = parser.parse_args()
 
     outpath = Path(args.outpath)
-    if not outpath.exists():
+    if args.outpath.endswith('.fits'):
+        if args.ci_night > 0:
+            print('Cannot specify filename in --outpath with --ci-night')
+            sys.exit(-1)
+        outpath = outpath.parent
+    if not outpath.is_dir():
         print('Non-existant output path: {0}.'.format(outpath))
         sys.exit(-1)
 
@@ -126,27 +162,41 @@ def etccalib():
         inpath = Path(args.stxl_path)
         if not inpath.exists():
             raise FileNotFoundError(str(inpath))
-        CA = CalibrationAnalysis('STXL', 2047, 3072)
-        zero_paths = [str(P) for P in inpath.glob('zero_*.fits')]
+        zero_paths = get_files(inpath, 'zero_{N}.fits', args.zero_min, args.zero_max)
         nzero = len(zero_paths)
-        dark_paths = [str(P) for P in inpath.glob('dark_*.fits')]
+        dark_paths = get_files(inpath, 'dark_{N}.fits', args.dark_min, args.dark_max)
         ndark = len(dark_paths)
+        flat_paths = get_files(inpath, 'flat_{N}.fits', args.flat_min, args.flat_max)
+        nflat = len(flat_paths) 
         if args.verbose:
-            print('Found {0} zero and {1} dark exposures from {2}'
-                  .format(nzero, ndark, args.stxl_path))
-        raw = np.empty((nzero,) + CA.shape, np.uint16)
-        if args.verbose:
-            print('Loading zero frames...')
-        for k, name in enumerate(zero_paths):
-            raw[k] = fitsio.read(name)
-        CA.process_zeros(raw, refine='auto', verbose=args.verbose)
-        raw = np.empty((ndark,) + CA.shape, np.uint16)
-        if args.verbose:
-            print('Loading dark frames...')
-        for k, name in enumerate(dark_paths):
-            raw[k] = fitsio.read(name)
-        CA.process_darks(raw, refine='auto', verbose=args.verbose)
-        CA.save(str(outpath / 'stxl-calib.fits'))
+            print('Found {0} zero, {1} dark, {2} flat exposures from {3}'
+                  .format(nzero, ndark, nflat, args.stxl_path))
+        CA = CalibrationAnalysis('STXL', 2047 // args.binning, 3072 // args.binning)
+        if nzero > 0:
+            raw = np.empty((nzero,) + CA.shape, np.uint16)
+            if args.verbose:
+                print('Loading zero frames...')
+            for k, name in enumerate(zero_paths):
+                raw[k] = fitsio.read(name)
+            CA.process_zeros(raw, refine='auto', verbose=args.verbose)
+        if ndark > 0:
+            raw = np.empty((ndark,) + CA.shape, np.uint16)
+            if args.verbose:
+                print('Loading dark frames...')
+            for k, name in enumerate(dark_paths):
+                raw[k] = fitsio.read(name)
+            CA.process_darks(raw, refine='auto', verbose=args.verbose)
+        if nflat > 0:
+            raw = np.empty((nflat,) + CA.shape, np.uint16)
+            if args.verbose:
+                print('Loading flat frames...')
+            for k, name in enumerate(flat_paths):
+                raw[k] = fitsio.read(name)
+            CA.process_darks(raw, refine='auto', verbose=args.verbose)
+        # Save the results.
+        if not args.outpath.endswith('.fits'):
+            args.outpath = str(outpath / 'stxl-calib.fits')
+        CA.save(args.outpath)
 
     if args.ci_night > 0:
         # Initialize the online database.
