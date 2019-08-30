@@ -199,3 +199,198 @@ class CalibFitter(object):
         else:
             self.data['yfit'] = self.predict(*theta0)
             return (result,) + tuple(theta0)
+
+
+class FlatFieldFitter(object):
+    """Fit flat field illumination to an interpolating polynomial.
+
+    The interpolation order will be bicubic if there are sufficient
+    knots, or otherwise downgraded to quadratic or linear.
+
+    Parameters
+    ----------
+    shape : tuple
+        Tuple (ny, nx) specifying the dimensions of the images to fit.
+    downsampling : int
+        Use a value > 1 to perform the fit to downsampled images
+        with predictions integrated over each downsampled block.
+    knots : tuple
+        Number of knots (nyk, nxk) to use along the y- and x-axes.
+        Knots are equally spaced between (and including) the corners
+        of the image. For equal spacing along both axes, you should
+        have (nyk - 1) / (nxk - 1) = ny / nx. At least 4 knots are
+        required for cubic interpolation along each axis.
+    """
+    def __init__(self, shape, downsampling=32, knots=(5, 7)):
+        (ny, nx) = self.shape = shape
+        (nyk, nxk) = self.knots = knots
+        # Space knots equally between the image corners.
+        self.x_knot = np.linspace(-0.5, nx - 0.5, nxk)
+        self.y_knot = np.linspace(-0.5, ny - 0.5, nyk)
+        # Use bicubic interpolation if possible.
+        self.kx = max(nxk - 1, 3)
+        self.ky = max(nyk - 1, 3)
+        self.downsampling = downsampling
+        # Evaluate the interpolation at each pixel center.
+        self.xc = np.arange(nx)
+        self.yc = np.arange(ny)
+        # Integrate the interpolation over downsampled blocks.
+        self.xd = np.arange((nx // downsampling) + 1) * downsampling - 0.5
+        self.yd = np.arange((ny // downsampling) + 1) * downsampling - 0.5
+        self.nxd = len(self.xd) - 1
+        self.nyd = len(self.yd) - 1
+
+    def predict(self, theta, downsampled=True):
+        """Predict the bias subtracted flat field signal in ADU.
+
+        Parameters
+        ----------
+        theta : array
+            2D array of shape self.knots containing the illumination
+            values at each knot, in bias subtracted ADUs.
+        downsampled : bool
+            When False, calculate a prediction at each pixel center.
+            This is equivalent to downsampling == 1 and temporarily
+            overrides the actual value of downsampling.
+
+        Returns
+        -------
+        array
+            2D array of predicted values. If downsampling == 1, values are
+            calculated at the center of each pixel. If downsampling > 1,
+            values are pixel means integrated over each downsampled block.
+        """
+        theta = self.yscale * theta + self.y0
+        spline = scipy.interpolate.RectBivariateSpline(
+            self.y_knot, self.x_knot, theta.reshape(self.knots))
+        if not downsampled or self.downsampling == 1:
+            return spline(self.yc, self.xc, grid=True)
+        else:
+            pred = np.empty((self.nyd, self.nxd))
+            for iy in range(self.nyd):
+                for ix in range(self.nxd):
+                    pred[iy, ix] = spline.integral(
+                        self.yd[iy], self.yd[iy + 1], self.xd[ix], self.xd[ix + 1])
+            # Normalize to average per pixel within each downsampled block.
+            return pred / self.downsampling ** 2
+
+    def nll(self, theta, ydata, valid, rdnoise, gain):
+        """Calculate the -logL of the data given parameters theta.
+
+        The variance in ADU ** 2 of each observed pixel value is assumed
+        to be rdnoise ** 2 + gain * prediction, where rdnoise and the
+        prediction are in ADU.
+        
+        Parameters
+        ----------
+        theta : array
+            2D array of shape self.knots containing the illumination
+            values at each knot, in bias subtracted ADUs.
+        ydata : array
+            2D array of bias subtracted observed pixel values. When
+            downsampling > 1, values should be averages over the valid pixels
+            in each downsampled block.
+        valid : array
+            2D array of 0 and 1 values where 1 indicates a valid pixel to
+            use in the calculation.
+        rdnoise : float
+            Read noise in ADU to use in the noise model.
+        gain : float
+            Inverse gain in e/ADU to use in the noise model.
+        """
+        ypred = self.predict(theta)
+        ivar = valid / (rdnoise ** 2 + gain * ypred)
+        result = 0.5 * np.sum(ivar * (ydata - ypred) ** 2)
+        return result
+
+    def fit(self, raw, mask, bias, rdnoise, gain, navg=32, verbose=True):
+        """Fit raw image data to a smooth flat field illumination model.
+
+        Parameters
+        ----------
+        raw : array
+            2D array of (ny, nx) raw pixel values in ADU.
+        mask : array
+            2D array of (ny, nx) pixel mask values, where a value of
+            zero indicates a valid pixel to use in the fit.
+        bias : array or float
+            Bias value in ADU to subtract from each raw pixel value.
+            Can be a constant or 2D array of shape (ny, nx).
+        rdnoise : float
+            Read noise in ADU to use in the noise model.
+        gain : float
+            Inverse gain in e/ADU to use in the noise model.
+        navg : int
+            Initial knot parameters for the fit are averages over a
+            block of size 2 * navg + 1 pixels centered on each knot.
+        verbose : bool
+            Report any fit issues when True.
+
+        Returns
+        -------
+        tuple
+            Tuple (fit, ypred) where fit is a scipy.optimize.OptimizeResult
+            and ypred is a 2D array of (ny, nx) predicted bias-subtracted
+            pixel values using the best fit parameters, when fit.success is
+            True or otherwise the initial fit parameters.
+        """
+        (ny, nx) = self.shape
+        if raw.shape != self.shape or mask.shape != self.shape:
+            raise ValueError('Input arrays have the wrong shape.')
+
+        # Calculate the bias subtracted data.
+        ydata = (raw - bias).astype(np.float64)
+        valid = (mask == 0).astype(np.float64)
+
+        # Calculate coefficients for scaling the fit parameters to O(1).
+        self.y0 = np.median(ydata[valid > 0])
+        self.yscale = np.std(ydata[valid > 0])
+
+        # Calculate the initial fit parameters as mean values near each knot.
+        # The default is y0 when no valid pixels are available for averaging.
+        theta0 = np.full(self.knots, self.y0)
+        for i, y in enumerate(self.y_knot):
+            iy = int(round(y))
+            ylo, yhi = max(0, iy - navg), min(ny, iy + navg + 1)
+            for j, x in enumerate(self.x_knot):
+                ix = int(round(x))
+                xlo, xhi = max(0, ix - navg), min(nx, ix + navg + 1)
+                nvalid = np.sum(valid[ylo:yhi, xlo:xhi])
+                if nvalid > 0:
+                    theta0[i, j] = np.sum(ydata[ylo:yhi, xlo:xhi]) / nvalid                    
+        # Normalize the fit parameters.
+        theta0 = (theta0 - self.y0) / self.yscale
+
+        # Downsample the data if requested, using only valid pixels to
+        # calculated the downsampled mean over each block.
+        if self.downsampling > 1:
+            DW = desietcimg.util.downsample(
+                ydata * valid, self.downsampling, np.sum, allow_trim=True)
+            W = desietcimg.util.downsample(
+                valid, self.downsampling, np.sum, allow_trim=True)
+            ydata = np.divide(DW, W, out=np.zeros_like(DW), where=W>0)
+            valid = (W > 0).astype(np.float64)
+
+        # Try the fit with BFGS first.
+        result = scipy.optimize.minimize(
+            self.nll, theta0, args=(ydata, valid, rdnoise, gain),
+            method='BFGS', jac='2-point', options=dict(
+                maxiter=10000, gtol=1e-2, disp=False))
+
+        if not result.success:
+            if verbose:
+                print('BFGS fit failed, so will retry with Nelder-Mead.')
+                print(result.message)
+            # Try again from the BFGS result using Nelder-Mead.
+            theta0 = result.x
+            result = scipy.optimize.minimize(
+                self.nll, theta0, args=(ydata, valid, rdnoise, gain),
+                method='Nelder-Mead', options=dict(
+                    maxiter=10000, xatol=1e-3, fatol=1e-3, disp=False))
+            if not result.success and verbose:
+                print('Nelder-Mead also failed.')
+                print(result.message)
+
+        theta = result.x if result.success else theta0
+        yfit = self.predict(theta, downsampled=False)
+        return result, yfit
