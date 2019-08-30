@@ -13,6 +13,7 @@ class CalibrationAnalysis(object):
     
     ZERO_MASK = 0
     DARK_MASK = 1
+    DARK_VAR =  2
 
     def __init__(self, name, ny, nx):
         self.name = name
@@ -79,6 +80,11 @@ class CalibrationAnalysis(object):
             raw, verbose=verbose)
         mask, self.pixmu = self.mask_defects(raw, self.avgdark, self.stddark, nsig=50, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_MASK)
+
+        self.pixmu2, self.pixvar, self.pvalue = self.pixel_variance(raw, verbose=verbose)
+        #self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_VAR)
+        return
+
         if refine == 'auto':
             refine = self.stddark / np.sqrt(len(raw)) < np.std(self.pixmu[self.pixmask == 0])
         if refine:
@@ -117,6 +123,9 @@ class CalibrationAnalysis(object):
             # Write the pixel biases.
             hdus.write(self.pixbias, extname='BIAS')
             hdus.write(self.pixmu, extname='MU')
+            hdus.write(self.pixmu2, extname='MU2')
+            hdus.write(self.pixvar, extname='VAR')
+            hdus.write(self.pvalue, extname='PVAL')
             # Write tables of pedestal data.
             hdus.write(self.zerodata, extname='ZERDAT')
             hdus.write(self.darkdata, extname='DRKDAT')
@@ -135,6 +144,9 @@ class CalibrationAnalysis(object):
             CA.pixmask[:] = hdus['MASK'].read()
             CA.pixbias = hdus['BIAS'].read().copy()
             CA.pixmu = hdus['MU'].read().copy()
+            CA.pixmu2 = hdus['MU2'].read().copy()
+            CA.pixvar = hdus['VAR'].read().copy()
+            CA.pvalue = hdus['PVAL'].read().copy()
             CA.zerodata = hdus['ZERDAT'].read().copy()
             CA.darkdata = hdus['DRKDAT'].read().copy()
             return CA
@@ -209,6 +221,23 @@ class CalibrationAnalysis(object):
                   .format(np.std(pixmu[~mask]), std / np.sqrt(nexp)))
 
         return mask, pixmu
+
+    def pixel_variance(self, raw, verbose=True):
+        """
+        """
+        nexp, maxval = self.validate(raw)
+        ny, nx = raw[0].shape
+        pixmu = np.zeros((ny, nx), np.float32)
+        pixvar = np.zeros((ny, nx), np.float32)
+        pvalue = np.zeros((ny, nx), np.float32)
+        for iy in range(ny):
+            for ix in range(nx):
+                X = raw[:, iy, ix].astype(np.float)
+                pixmu[iy, ix] = np.median(X)
+                pixvar[iy, ix] = np.var(X)
+                if pixvar[iy, ix] > 0:
+                    _, pvalue[iy, ix] = scipy.stats.shapiro(X)
+        return pixmu, pixvar, pvalue
 
     def refine_noise(self, raw, std, mask, pixmu, verbose=True):
         """
