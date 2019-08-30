@@ -231,10 +231,24 @@ def plot_calib_frame(CA, what='bias', downsampling=4, cmap='viridis', masked_col
         ax.imshow(CA.pixmask, interpolation='none', origin='lower')
 
 
-def plot_calib_data(CA, what='zero'):
-    data = CA.zerodata if what == 'zero' else CA.darkdata
-    plt.plot(data['xpix'], data['ydata'], 'k.', label='Data')
-    plt.plot(data['xpix'], data['yfit'], 'b-', alpha=0.5, label='Fit')
-    plt.yticks([])
-    plt.xlabel('Pixel Value [ADU]')
-    plt.legend()
+def plot_calib_data(CA, what='zero', ax=None):
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+    if what in ('zero_fit', 'dark_fit'):
+        data = CA.zerodata if what == 'zero' else CA.darkdata
+        axplot(data['xpix'], data['ydata'], 'k.', label='Data')
+        ax.plot(data['xpix'], data['yfit'], 'b-', alpha=0.5, label='Fit')
+        ax.set_yticks([])
+        ax.set_xlabel('Pixel Value [ADU]')
+        plt.legend()
+    elif what in ('pixbias', 'pixmu'):
+        data = CA.pixbias if what == 'pixbias' else CA.pixmu
+        data = data[CA.pixmask == 0]
+        bins = np.linspace(*np.percentile(data, (0.5, 99.5)), 51)
+        ax.hist(data, bins)
+        mean = np.mean(data)
+        ax.axvline(mean, ls='--', c='k', label='Mean {0:.1f} ADU'.format(mean))
+        ax.set_xlim(bins[0], bins[-1])
+        ax.set_xlabel('Pixel Mean [ADU]')
+        ax.set_yticks([])
+        plt.legend()
