@@ -6,6 +6,8 @@ import numpy as np
 
 import scipy.optimize
 
+import desietcimg.util
+
 
 class GaussFitter(object):
     """Fit a single 2D Gaussian + constant background to a square image.

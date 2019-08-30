@@ -3,6 +3,7 @@
 import numpy as np
 
 import scipy.special
+import scipy.linalg
 
 import fitsio
 
@@ -25,6 +26,8 @@ class CalibrationAnalysis(object):
     def reset(self):
         self.pixmask[:] = 0
         self.have_zeros = False
+        self.have_darks = False
+        self.have_flats = False
 
     def validate(self, raw):
         if raw.dtype != np.uint16:
@@ -76,6 +79,9 @@ class CalibrationAnalysis(object):
             raise RuntimeError('Must call process_zeros before process_darks.')
         if verbose:
             print('== {0} darks analysis:'.format(self.name))
+
+        self.have_darks = True
+
         self.fitok, self.avgdark, self.stddark, self.darkdata = self.fit_pedestal(
             raw, verbose=verbose)
         mask, self.pixmu = self.mask_defects(raw, self.avgdark, self.stddark, nsig=50, verbose=verbose)
@@ -101,6 +107,35 @@ class CalibrationAnalysis(object):
         invgain = (self.stddark ** 2 - self.rdnoise ** 2) / (self.avgdark - self.avgbias)
         print('invgain', invgain)
 
+    def process_flats(self, raw, gain_guess=1.5, downsampling=32, verbose=True):
+        """
+        """
+        if not self.have_zeros:
+            raise RuntimeError('Must call process_zeros before process_darks.')
+        if verbose:
+            print('== {0} flats analysis:'.format(self.name))
+        self.validate(raw)
+        nexp, ny, nx = raw.shape
+        FFF = desietcimg.fit.FlatFieldFitter((ny, nx), downsampling=downsampling)
+        mu_all, var_all = [], []
+        for iexp in range(nexp):
+            result, ypred = FFF.fit(raw[iexp], self.pixmask, self.pixbias,
+                                    self.rdnoise, gain_guess, verbose=verbose)
+            mu, var = self.flat_gain_analysis(
+                raw[iexp] - self.pixbias, self.pixmask, ypred, self.rdnoise)
+            mu_all.append(mu)
+            var_all.append(var)
+        # Perform a least squares fit to the slope of these poihts, constrained to pass
+        # through the origin, to estimate the inverse gain.
+        mu = np.concatenate(mu_all)
+        var = np.concatenate(var_all)
+        self.flatinvgain = 1 / np.linalg.lstsq(mu.reshape(-1, 1), var, rcond=None)[0][0]
+        # Package the mu,var values into a recarray.
+        self.flatdata = np.empty(len(mu), dtype=[('mu', np.float32), ('var', np.float32),])
+        self.flatdata['mu'] = mu
+        self.flatdata['var'] = var
+        self.have_flats = True
+
     def save(self, name, overwrite=True):
         """
         """
@@ -114,21 +149,34 @@ class CalibrationAnalysis(object):
                 NX=self.shape[1],
                 AVGBIAS=self.avgbias,
                 RDNOISE=self.rdnoise,
-                AVGDARK=self.avgdark,
-                STDDARK=self.stddark,
+                DARKS=self.have_darks,
+                FLATS=self.have_flats,
             )
+            if self.have_darks:
+                meta.update(dict(
+                    AVGDARK=self.avgdark,
+                    STDDARK=self.stddark,
+                ))
+            if self.have_flats:
+                meta.update(dict(
+                    FLATG=self.flatinvgain,
+                ))
             hdus.write(np.zeros((1,), dtype=np.float32), header=meta)
             # Write the pixel mask.
             hdus.write(self.pixmask, extname='MASK')
-            # Write the pixel biases.
+            # Write image data.
             hdus.write(self.pixbias, extname='BIAS')
-            hdus.write(self.pixmu, extname='MU')
-            hdus.write(self.pixmu2, extname='MU2')
-            hdus.write(self.pixvar, extname='VAR')
-            hdus.write(self.pvalue, extname='PVAL')
-            # Write tables of pedestal data.
+            if self.have_darks:
+                hdus.write(self.pixmu, extname='MU')
+                hdus.write(self.pixmu2, extname='MU2')
+                hdus.write(self.pixvar, extname='VAR')
+                hdus.write(self.pvalue, extname='PVAL')
+            # Write table data.
             hdus.write(self.zerodata, extname='ZERDAT')
-            hdus.write(self.darkdata, extname='DRKDAT')
+            if self.have_darks:
+                hdus.write(self.darkdata, extname='DRKDAT')
+            if self.have_flats:
+                hdus.write(self.flatdata, extname='FLTDAT')
 
     @staticmethod
     def load(name):
@@ -137,18 +185,25 @@ class CalibrationAnalysis(object):
         with fitsio.FITS(name, 'r') as hdus:
             meta = hdus[0].read_header()
             CA = CalibrationAnalysis(meta['NAME'], meta['NY'], meta['NX'])
+            CA.have_zeros = True
+            CA.have_darks = meta['DARKS']
+            CA.have_flats = meta['FLATS']
             CA.avgbias = meta['AVGBIAS']
             CA.rdnoise = meta['RDNOISE']
-            CA.avgdark = meta['AVGDARK']
-            CA.stddark = meta['STDDARK']
             CA.pixmask[:] = hdus['MASK'].read()
             CA.pixbias = hdus['BIAS'].read().copy()
-            CA.pixmu = hdus['MU'].read().copy()
-            CA.pixmu2 = hdus['MU2'].read().copy()
-            CA.pixvar = hdus['VAR'].read().copy()
-            CA.pvalue = hdus['PVAL'].read().copy()
-            CA.zerodata = hdus['ZERDAT'].read().copy()
-            CA.darkdata = hdus['DRKDAT'].read().copy()
+            if CA.have_darks:
+                CA.avgdark = meta['AVGDARK']
+                CA.stddark = meta['STDDARK']
+                CA.pixmu = hdus['MU'].read().copy()
+                CA.pixmu2 = hdus['MU2'].read().copy()
+                CA.pixvar = hdus['VAR'].read().copy()
+                CA.pvalue = hdus['PVAL'].read().copy()
+                CA.zerodata = hdus['ZERDAT'].read().copy()
+                CA.darkdata = hdus['DRKDAT'].read().copy()
+            if CA.have_flats:
+                CA.flatinvgain = meta['FLATG']
+                CA.flatdata = hdus['FLTDAT'].read().copy()
             return CA
 
     def fit_pedestal(self, raw, nsiglo=3, nsighi=1, verbose=True):
@@ -268,3 +323,49 @@ class CalibrationAnalysis(object):
         std *= np.sqrt(1 - 1 / nexp)
 
         return std, self.fitter.data
+
+    def flat_gain_analysis(self, ydata, mask, ypred, rdnoise, nsig_cut=0.05, nbin=10, verbose=True):
+        """Estimate variance in bins of bias-subtracted signal.
+
+        Parameters
+        ----------
+        ydata : array
+            2D array of bias-subtracted data from a single exposure in ADU.
+        mask : array
+            2D array of pixel masks where zero indicates a good pixel to
+            use in the analysis.
+        ypred : array
+            2D array of smooth predicted bias-subtracted data in ADU.
+            Can be obtained using :class:`desietcimg.fit.FlatFieldFitter`.
+
+        Returns
+        -------
+        tuple
+            Tuple (mu, var) of mean predicted bias-subtracted signal in ADU
+            and the corresponding shot-noise variance in ADU ** 2 estimated in
+            bins of predicted signal.
+        """
+        valid = (mask == 0)
+        ypred_valid = ypred[valid]
+        residual = ydata - ypred
+
+        # Calculate percentile bins in the predicted value.
+        edges = np.percentile(ypred_valid, np.linspace(0, 100, nbin + 1))
+        binsize = np.diff(edges)
+        ibin = np.full(ydata.shape, -1)
+        ibin[valid] = np.minimum(nbin - 1, np.digitize(ypred_valid, edges, right=False) - 1)    
+
+        # Calculate the mean and variance in each bin.
+        mu, var = [], []
+        for i in range(nbin):
+            if binsize[i] > 2 * np.median(binsize):
+                # Do not use bins that are too wide.
+                continue
+            inbin = ibin == i
+            Y = ypred[valid & inbin]
+            DY = residual[valid & inbin]
+            _, lo, hi = scipy.stats.sigmaclip(DY, low=6, high=6)
+            good = (DY >= lo) & (DY <= hi)
+            mu.append(np.mean(Y[good]))
+            var.append(np.var(DY[good]) - rdnoise ** 2)
+        return np.array(mu), np.array(var)

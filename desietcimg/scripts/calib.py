@@ -192,7 +192,7 @@ def etccalib():
                 print('Loading flat frames...')
             for k, name in enumerate(flat_paths):
                 raw[k] = fitsio.read(name)
-            CA.process_darks(raw, refine='auto', verbose=args.verbose)
+            CA.process_flats(raw, verbose=args.verbose)
         # Save the results.
         if not args.outpath.endswith('.fits'):
             args.outpath = str(outpath / 'stxl-calib.fits')
