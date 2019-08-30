@@ -252,3 +252,19 @@ def plot_calib_data(CA, what='zero', ax=None):
         ax.set_xlabel('Pixel Mean [ADU]')
         ax.set_yticks([])
         plt.legend()
+
+
+def plot_gain_fit(CA, ax=None):
+    if not CA.have_flats:
+        raise ValueError('Calibration does not include flats analysis.')
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+    ax.plot(CA.flatdata['mu'], CA.flatdata['var'], 'k+')
+    xmax = 1.05 * CA.flatdata['mu'].max()
+    g = CA.flatinvgain
+    ax.plot([0, xmax], [0, xmax / g], 'r--', label='g = {0:.2f} e/ADU'.format(g))
+    ax.legend()
+    ax.set_xlabel('Bias subtracted signal [ADU]')
+    ax.set_ylabel('Read-noise subtracted variance [ADU$^2$]')
+    ax.set_xlim(0, xmax)
+    ax.set_ylim(0, None)
