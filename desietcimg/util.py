@@ -1,11 +1,15 @@
 """General purpose utilities for imaging analysis.
 """
 import os
+import re
+import pathlib
 
 import numpy as np
 
 import scipy.signal
 import scipy.stats
+
+import fitsio
 
 
 def downsample(data, downsampling, summary=np.sum, allow_trim=False):
@@ -302,7 +306,7 @@ def mask_defects(D, W, chisq_max=5e3, kernel_size=3, min_neighbors=7, inplace=Fa
 
 
 def get_data(name, must_exist=False):
-    """Return the absolute path to a named data file.
+    """Return the absolute path to a named data file associated with this package.
     
     Relative paths refer to the desietcimg/data/ folder of this installation.
     Use an absolute path to override this behavior.
@@ -316,3 +320,105 @@ def get_data(name, must_exist=False):
     if must_exist and not os.path.exists(path):
         raise RuntimeError('Non-existent data file: {0}'.format(path))
     return path
+
+
+def find_files(pattern, min=None, max=None, check_parent=True):
+    """Find files matching a pattern with a sequence number.
+
+    The sequence number is represented using {N} in the input pattern,
+    which must appear exactly once in the final path element.
+
+    Parameters
+    ----------
+    pattern : str or pathlib.Path
+        File pattern using {N} to represent the sequence number.
+    min : int or None
+        Only values of N >= min will be returned.
+    max : int or None
+        Only values of N <= max will be returned.
+    check_parent : bool
+        Raise an exception when True and the parent directory does
+        not exist.
+
+    Returns
+    -------
+    list
+        List of filenames matching the pattern and filtered by
+        any min/max cuts.
+    """
+    if not isinstance(pattern, pathlib.Path):
+        pattern = pathlib.Path(pattern)
+    parent_path = pattern.parent
+    if check_parent and not parent_path.exists():
+        raise FileNotFoundError(parent_path)
+    file_pattern = pattern.name
+    if '{N}' not in file_pattern:
+        raise ValueError('Missing sequence number {{N}} in pattern: {0}'
+                         .format(file_pattern))
+    paths = sorted([str(P) for P in parent_path.glob(file_pattern.format(N='*'))])
+    if min is None and max is None:
+        return paths
+    regexp = re.compile(file_pattern.format(N='([0-9]+)') + '$')
+    selected = []
+    for path in paths:
+        found = regexp.search(path)
+        if found:
+            seqnum = int(found.group(1))
+            if min is not None and seqnum < min:
+                continue
+            if max is not None and seqnum > max:
+                continue
+            selected.append(path)
+    return selected
+
+
+def load_raw(files, *keys, hdu=0, verbose=False):
+    """ Load a sequence of raw data from FITS files into a single array.
+
+    Parameters
+    ----------
+    files : iterable or str
+        List of filenames to read or a pattern that will be passed to
+        :func:`find_files`.
+    keys : variable args
+        Header keywords that are required to match between all files.
+        Any mismatch will raise a RuntimeError.  It is not considered an
+        error if a keyword is missing, as long as it is missing in all files.
+    hdu : int or str
+        Index or name of the HDU containing the raw data and header keywords.
+    verbose : bool
+        Print information about the raw format and metadata when True.
+
+    Returns
+    -------
+    tuple
+        Tuple (raw, meta) where raw is a numpy array of shape (nexp, ny, nx)
+        and the specified dtype, containing the contents of each file in the
+        order they are listed in the input files, and meta is a dictionary
+        of the constant value of each specified header keyword.
+    """
+    if '{N}' in files:
+        files = find_files(files)
+    nexp = len(files)
+    for k, file in enumerate(files):
+        with fitsio.FITS(file, mode='r') as hdus:
+            if k == 0:
+                data = hdus[hdu].read()
+                raw = np.empty((nexp,) + data.shape, data.dtype)
+                raw[0] = data
+                if verbose:
+                    print('Reading {0} files with shape {1} and dtype {2}.'
+                          .format(nexp, data.shape, data.dtype))
+            else:
+                raw[k] = hdus[hdu].read()
+            hdr = hdus[hdu].read_header()
+            meta = {key: hdr.get(key) for key in keys}
+        if k == 0:
+            metaref = meta
+            if verbose:
+                for key in keys:
+                    print('  {0} = {1}'.format(key, meta[key]))
+        elif meta != metaref:
+            raise RuntimeError('Files have different metadata: {0}, {1}.'
+                               .format(files[0], files[k]))
+    return raw, metaref
