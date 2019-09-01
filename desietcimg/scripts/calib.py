@@ -168,7 +168,7 @@ def etccalib():
         if nflat > 0:
             if args.verbose:
                 print('Loading flat frames...')
-            raw, meta = load_raw(dark_paths, 'SET-TEMP', verbose=args.verbose)
+            raw, meta = load_raw(flat_paths, 'SET-TEMP', verbose=args.verbose)
             CA.process_flats(raw, verbose=args.verbose)
         # Save the results.
         if not args.outpath.endswith('.fits'):
