@@ -164,7 +164,7 @@ def etccalib():
             if args.verbose:
                 print('Loading dark frames...')
             raw, meta = load_raw(dark_paths, 'EXPTIME', 'SET-TEMP', verbose=args.verbose)
-            CA.process_darks(raw, refine='auto', verbose=args.verbose)
+            CA.process_darks(raw, meta['SET-TEMP'], meta['EXPTIME'], verbose=args.verbose)
         if nflat > 0:
             if args.verbose:
                 print('Loading flat frames...')

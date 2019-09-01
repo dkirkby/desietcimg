@@ -14,7 +14,6 @@ class CalibrationAnalysis(object):
     
     ZERO_MASK = 0
     DARK_MASK = 1
-    DARK_VAR =  2
 
     def __init__(self, name, ny, nx):
         self.name = name
@@ -76,40 +75,18 @@ class CalibrationAnalysis(object):
                   .format(self.name, self.rdnoise, self.avgbias))
         self.have_zeros = True
 
-    def process_darks(self, raw, refine='auto', verbose=True):
+    def process_darks(self, raw, temperature, exptime, verbose=True):
         if not self.have_zeros:
             raise RuntimeError('Must call process_zeros before process_darks.')
         if verbose:
             print('== {0} darks analysis:'.format(self.name))
-
+        ok = self.check_consistency(raw, self.pixmask > 0, verbose=verbose)
         self.fitok, self.avgdark, self.stddark, self.darkdata = self.fit_pedestal(
-            raw, verbose=verbose)
+            raw[ok], verbose=verbose)
         mask, self.pixmu = self.mask_defects(raw, self.avgdark, self.stddark, nsig=50, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_MASK)
-
-        ## TODO: check that median in each exposure is within limits.
-
-        self.pixmu2, self.pixvar, self.pvalue = self.pixel_variance(raw, verbose=verbose)
-        #self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_VAR)
-
+        self.dark_temperature = temperature
         self.have_darks = True
-        return
-
-        if refine == 'auto':
-            refine = self.stddark / np.sqrt(len(raw)) < np.std(self.pixmu[self.pixmask == 0])
-        if refine:
-            self.stddark, self.darkdata = self.refine_noise(
-                raw, self.stddark, self.pixmask, self.pixmu, verbose=verbose)
-            self.avgdark = np.mean(self.pixmu)
-
-        if self.stddark <= self.rdnoise:
-            if verbose:
-                print('Unable to determine gain since std(dark) < std(zero).')
-            self.gain = np.nan
-            return False
-
-        invgain = (self.stddark ** 2 - self.rdnoise ** 2) / (self.avgdark - self.avgbias)
-        print('invgain', invgain)
 
     def process_flats(self, raw, gain_guess=1.5, downsampling=32, verbose=True):
         """
@@ -160,6 +137,7 @@ class CalibrationAnalysis(object):
                 meta.update(dict(
                     AVGDARK=self.avgdark,
                     STDDARK=self.stddark,
+                    DKTEMP=self.dark_temperature,
                 ))
             if self.have_flats:
                 meta.update(dict(
@@ -172,9 +150,6 @@ class CalibrationAnalysis(object):
             hdus.write(self.pixbias, extname='BIAS')
             if self.have_darks:
                 hdus.write(self.pixmu, extname='MU')
-                hdus.write(self.pixmu2, extname='MU2')
-                hdus.write(self.pixvar, extname='VAR')
-                hdus.write(self.pvalue, extname='PVAL')
             # Write table data.
             hdus.write(self.zerodata, extname='ZERDAT')
             if self.have_darks:
@@ -196,14 +171,12 @@ class CalibrationAnalysis(object):
             CA.rdnoise = meta['RDNOISE']
             CA.pixmask[:] = hdus['MASK'].read()
             CA.pixbias = hdus['BIAS'].read().copy()
+            CA.zerodata = hdus['ZERDAT'].read().copy()
             if CA.have_darks:
                 CA.avgdark = meta['AVGDARK']
                 CA.stddark = meta['STDDARK']
+                CA.dark_temperature = meta['DKTEMP']
                 CA.pixmu = hdus['MU'].read().copy()
-                CA.pixmu2 = hdus['MU2'].read().copy()
-                CA.pixvar = hdus['VAR'].read().copy()
-                CA.pvalue = hdus['PVAL'].read().copy()
-                CA.zerodata = hdus['ZERDAT'].read().copy()
                 CA.darkdata = hdus['DRKDAT'].read().copy()
             if CA.have_flats:
                 CA.flatinvgain = meta['FLATG']
@@ -218,11 +191,14 @@ class CalibrationAnalysis(object):
             if verbose:
                 print('Cannot check consistency with nexp < 3.')
             return np.ones(nexp, bool)
-        if mask is None:
-            lo, med, hi = np.percentile(raw, q=(25, 50, 75), axis=(1, 2))
-        else:
-            # Calculate percentiles of unmasked pixels in each exposure.
-            lo, med, hi = np.percentile(raw[:, ~mask], q=(25, 50, 75), axis=1)
+        # Calculate percentiles for each exposure.
+        pctile = np.empty((nexp, 3))
+        for iexp in range(nexp):
+            D = raw[iexp].copy()
+            if mask is not None:
+                D = D[~mask]
+            pctile[iexp] = np.percentile(D,  q=(25, 50, 75))
+        lo, med, hi = pctile.T
         # Look for outliers in the median, using hi - lo to set the scale.
         dev = np.abs(med -  np.median(med)) / np.median(hi - lo)
         ok =  dev < threshold
@@ -230,7 +206,6 @@ class CalibrationAnalysis(object):
             nok = np.count_nonzero(ok)
             print('{0} / {1} exposures fail consistency check with threshold={2}.'
                   .format(nexp - nok, nexp, threshold))
-        else:
             print('Max consistency deviation is {0} < threshold={1}.'
                   .format(np.max(dev), threshold))
         return ok
