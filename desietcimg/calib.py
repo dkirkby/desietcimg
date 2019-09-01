@@ -59,15 +59,17 @@ class CalibrationAnalysis(object):
         """
         if verbose:
             print('== {0} zeros analysis:'.format(self.name))
+        ok = self.check_consistency(raw, verbose=verbose)
+        nok = np.count_nonzero(ok)
         self.fitok, self.avgbias, self.rdnoise, self.zerodata = self.fit_pedestal(
-            raw, verbose=verbose)
-        mask, self.pixbias = self.mask_defects(raw, self.avgbias, self.rdnoise, verbose=verbose)
+            raw[ok], verbose=verbose)
+        mask, self.pixbias = self.mask_defects(raw[ok], self.avgbias, self.rdnoise, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.ZERO_MASK)
         if refine == 'auto':
-            refine = self.rdnoise / np.sqrt(len(raw)) < np.std(self.pixbias[self.pixmask == 0])
+            refine = self.rdnoise / np.sqrt(nok) < np.std(self.pixbias[self.pixmask == 0])
         if refine:
             self.rdnoise, self.zerodata = self.refine_noise(
-                raw, self.rdnoise, self.pixmask, self.pixbias, verbose=verbose)
+                raw[ok], self.rdnoise, self.pixmask, self.pixbias, verbose=verbose)
             self.avgbias = np.mean(self.pixbias)
         if verbose:
             print('{0} read noise = {1:.3f} ADU avg bias = {2:.3f} ADU'
@@ -80,15 +82,17 @@ class CalibrationAnalysis(object):
         if verbose:
             print('== {0} darks analysis:'.format(self.name))
 
-        self.have_darks = True
-
         self.fitok, self.avgdark, self.stddark, self.darkdata = self.fit_pedestal(
             raw, verbose=verbose)
         mask, self.pixmu = self.mask_defects(raw, self.avgdark, self.stddark, nsig=50, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_MASK)
 
+        ## TODO: check that median in each exposure is within limits.
+
         self.pixmu2, self.pixvar, self.pvalue = self.pixel_variance(raw, verbose=verbose)
         #self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_VAR)
+
+        self.have_darks = True
         return
 
         if refine == 'auto':
@@ -205,6 +209,31 @@ class CalibrationAnalysis(object):
                 CA.flatinvgain = meta['FLATG']
                 CA.flatdata = hdus['FLTDAT'].read().copy()
             return CA
+
+    def check_consistency(self, raw, mask=None, threshold=0.25, verbose=True):
+        """
+        """
+        nexp, maxval = self.validate(raw)
+        if nexp < 3:
+            if verbose:
+                print('Cannot check consistency with nexp < 3.')
+            return np.ones(nexp, bool)
+        if mask is None:
+            lo, med, hi = np.percentile(raw, q=(25, 50, 75), axis=(1, 2))
+        else:
+            # Calculate percentiles of unmasked pixels in each exposure.
+            lo, med, hi = np.percentile(raw[:, ~mask], q=(25, 50, 75), axis=1)
+        # Look for outliers in the median, using hi - lo to set the scale.
+        dev = np.abs(med -  np.median(med)) / np.median(hi - lo)
+        ok =  dev < threshold
+        if verbose:
+            nok = np.count_nonzero(ok)
+            print('{0} / {1} exposures fail consistency check with threshold={2}.'
+                  .format(nexp - nok, nexp, threshold))
+        else:
+            print('Max consistency deviation is {0} < threshold={1}.'
+                  .format(np.max(dev), threshold))
+        return ok
 
     def fit_pedestal(self, raw, nsiglo=3, nsighi=1, verbose=True):
         """
