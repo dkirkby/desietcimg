@@ -60,7 +60,7 @@ class CalibrationAnalysis(object):
             print('== {0} zeros analysis:'.format(self.name))
         ok = self.check_consistency(raw, verbose=verbose)
         nok = np.count_nonzero(ok)
-        self.fitok, self.avgbias, self.rdnoise, self.zerodata = self.fit_pedestal(
+        fitok, self.avgbias, self.rdnoise, self.zerodata = self.fit_pedestal(
             raw[ok], verbose=verbose)
         mask, self.pixbias = self.mask_defects(raw[ok], self.avgbias, self.rdnoise, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.ZERO_MASK)
@@ -81,11 +81,11 @@ class CalibrationAnalysis(object):
         if verbose:
             print('== {0} darks analysis:'.format(self.name))
         ok = self.check_consistency(raw, self.pixmask > 0, verbose=verbose)
-        self.fitok, self.avgdark, self.stddark, self.darkdata = self.fit_pedestal(
-            raw[ok], verbose=verbose)
+        fitok, self.avgdark, self.stddark, _ = self.fit_pedestal(raw[ok], verbose=verbose)
         mask, self.pixmu = self.mask_defects(raw, self.avgdark, self.stddark, nsig=50, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_MASK)
         self.dark_temperature = temperature
+        self.darkdata = self.dark_current_analysis(raw, exptime)
         self.have_darks = True
 
     def process_flats(self, raw, gain_guess=1.5, downsampling=32, verbose=True):
@@ -206,7 +206,7 @@ class CalibrationAnalysis(object):
             nok = np.count_nonzero(ok)
             print('{0} / {1} exposures fail consistency check with threshold={2}.'
                   .format(nexp - nok, nexp, threshold))
-            print('Max consistency deviation is {0} < threshold={1}.'
+            print('Max consistency deviation is {0:.4f} < threshold={1}.'
                   .format(np.max(dev), threshold))
         return ok
 
@@ -373,3 +373,45 @@ class CalibrationAnalysis(object):
             mu.append(np.mean(Y[good]))
             var.append(np.var(DY[good]) - rdnoise ** 2)
         return np.array(mu), np.array(var)
+
+    def dark_current_analysis(self, raw, exptime, nbins=200, clip=(0.1, 90), verbose=True):
+
+        nexp, maxval = self.validate(raw)
+
+        # Set analysis range from pixel values.
+        valid = self.pixmask == 0
+        lo, hi = maxval, 0
+        for iexp in range(nexp):
+            lo_exp, hi_exp = np.percentile(raw[iexp, valid], clip)
+            lo = min(lo, lo_exp)
+            hi = max(hi, hi_exp)
+        lo = lo - self.avgbias
+        hi = hi - self.avgbias
+        bins = np.linspace(lo, hi, nbins + 1)
+
+        # Histogram the means.
+        signal = self.pixmu - self.pixbias
+        mean_hist, _ = np.histogram(signal, bins)
+
+        # Histogram each exposure.
+        exp_hist = np.empty((nexp, nbins), int)
+        for iexp in range(nexp):
+            exp_hist[iexp], _ = np.histogram((raw[iexp] - self.pixbias)[valid], bins)
+        # Calculate the per-pixel median of the exposure histograms.
+        one_hist = np.median(exp_hist, axis=0)
+
+        # Find the best fit model.
+        xbin = 0.5 * (bins[1:] + bins[:-1])
+        ##result, yfit = fit(xbin, mean_hist)
+
+        data = np.empty(len(xbin), dtype=[('xbin', np.float32),
+                                        ('yexp', np.float32),
+                                        ('yavg', np.float32),
+                                        ('yfit', np.float32)])
+        data['xbin'] = xbin
+        data['yexp'] = one_hist
+        data['yavg'] = mean_hist
+        #data['yfit'] = yfit
+
+        return data
+        #return result, data
