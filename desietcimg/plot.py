@@ -268,3 +268,37 @@ def plot_gain_fit(CA, ax=None):
     ax.set_ylabel('Read-noise subtracted variance [ADU$^2$]')
     ax.set_xlim(0, xmax)
     ax.set_ylim(0, None)
+
+
+def plot_dark_calib(CA, gain=1.5, peaklines=True, lo=None, hi=None, ax=None):
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+    # Plot second x-axis in units of dark current.
+    conv = gain / CA.dark_exptime
+    ax = plt.gca()
+    ax2 = ax.twiny()
+    ax2.set_xlabel('Dark current at {0:.0f}C [e/sec/pix]'.format(CA.dark_temperature))
+    
+    xbin = CA.darkdata['xbin']
+    if lo is None:
+        lo = xbin[0]
+    if hi is None:
+        hi = xbin[-1]
+
+    ax.plot(xbin, CA.darkdata['yexp'], 'k-', label='Single Exp.')
+    ax.plot(xbin, CA.darkdata['yavg'], 'r-', label='Stack of {0}'.format(CA.dark_nexp))
+    ax.plot(xbin, CA.darkdata['yfit'], 'r--', label='Model Fit')
+    
+    if peaklines:
+        # Draw lines at the best-fit peak locations.
+        x0, navg, spacing, c0, c1, c2 = CA.darktheta
+        for n in range(5):
+            x = x0 + spacing * n
+            ax.axvline(x, ls=':', c='gray')
+
+    ax.set_xlim(lo, hi)
+    ax2.set_xlim(conv * lo, conv * hi)
+    ax.set_ylim(0, None)
+    ax.set_yticks([])
+    ax.set_xlabel('Bias subtracted pixel value [ADU]')
+    ax.legend(title='{0} @ {1:.0f}s'.format(CA.name, CA.dark_exptime))

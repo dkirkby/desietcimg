@@ -20,6 +20,7 @@ class CalibrationAnalysis(object):
         self.shape = (ny, nx)
         self.pixmask = np.zeros(self.shape, np.uint8)
         self.fitter = desietcimg.fit.CalibFitter()
+        self.dark_fitter = desietcimg.fit.DarkCurrentFitter()
         self.reset()
 
     def reset(self):
@@ -82,10 +83,12 @@ class CalibrationAnalysis(object):
             print('== {0} darks analysis:'.format(self.name))
         ok = self.check_consistency(raw, self.pixmask > 0, verbose=verbose)
         fitok, self.avgdark, self.stddark, _ = self.fit_pedestal(raw[ok], verbose=verbose)
-        mask, self.pixmu = self.mask_defects(raw, self.avgdark, self.stddark, nsig=50, verbose=verbose)
+        mask, self.pixmu = self.mask_defects(raw[ok], self.avgdark, self.stddark, nsig=50, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_MASK)
         self.dark_temperature = temperature
-        self.darkdata = self.dark_current_analysis(raw, exptime)
+        self.dark_exptime = exptime
+        self.dark_nexp = np.count_nonzero(ok)
+        self.darktheta, self.darkdata = self.dark_current_analysis(raw, verbose=verbose)
         self.have_darks = True
 
     def process_flats(self, raw, gain_guess=1.5, downsampling=32, verbose=True):
@@ -134,10 +137,19 @@ class CalibrationAnalysis(object):
                 FLATS=self.have_flats,
             )
             if self.have_darks:
+                x0, navg, spacing, c0, c1, c2 = self.darktheta
                 meta.update(dict(
                     AVGDARK=self.avgdark,
                     STDDARK=self.stddark,
                     DKTEMP=self.dark_temperature,
+                    DKTIME=self.dark_exptime,
+                    DKNEXP=self.dark_nexp,
+                    DKX0=x0,
+                    DKNAVG=navg,
+                    DKDX=spacing,
+                    DKC0=c0,
+                    DKC1=c1,
+                    DKC2=c2,
                 ))
             if self.have_flats:
                 meta.update(dict(
@@ -163,7 +175,7 @@ class CalibrationAnalysis(object):
         """
         with fitsio.FITS(name, 'r') as hdus:
             meta = hdus[0].read_header()
-            CA = CalibrationAnalysis(meta['NAME'], meta['NY'], meta['NX'])
+            CA = CalibrationAnalysis(meta['NAME'].strip(), meta['NY'], meta['NX'])
             CA.have_zeros = True
             CA.have_darks = meta['DARKS']
             CA.have_flats = meta['FLATS']
@@ -176,6 +188,9 @@ class CalibrationAnalysis(object):
                 CA.avgdark = meta['AVGDARK']
                 CA.stddark = meta['STDDARK']
                 CA.dark_temperature = meta['DKTEMP']
+                CA.dark_exptime = meta['DKTIME']
+                CA.dark_nexp = meta['DKNEXP']
+                CA.darktheta = meta['DKX0'], meta['DKNAVG'], meta['DKDX'],meta['DKC0'], meta['DKC1'], meta['DKC2']
                 CA.pixmu = hdus['MU'].read().copy()
                 CA.darkdata = hdus['DRKDAT'].read().copy()
             if CA.have_flats:
@@ -374,7 +389,7 @@ class CalibrationAnalysis(object):
             var.append(np.var(DY[good]) - rdnoise ** 2)
         return np.array(mu), np.array(var)
 
-    def dark_current_analysis(self, raw, exptime, nbins=200, clip=(0.1, 90), verbose=True):
+    def dark_current_analysis(self, raw, nbins=500, clip=(0.1, 95), verbose=True):
 
         nexp, maxval = self.validate(raw)
 
@@ -402,7 +417,7 @@ class CalibrationAnalysis(object):
 
         # Find the best fit model.
         xbin = 0.5 * (bins[1:] + bins[:-1])
-        ##result, yfit = fit(xbin, mean_hist)
+        yfit, theta = self.dark_fitter.fit(xbin, mean_hist, verbose=verbose)
 
         data = np.empty(len(xbin), dtype=[('xbin', np.float32),
                                         ('yexp', np.float32),
@@ -411,7 +426,5 @@ class CalibrationAnalysis(object):
         data['xbin'] = xbin
         data['yexp'] = one_hist
         data['yavg'] = mean_hist
-        #data['yfit'] = yfit
-
-        return data
-        #return result, data
+        data['yfit'] = yfit
+        return theta, data

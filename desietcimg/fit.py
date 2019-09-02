@@ -396,3 +396,43 @@ class FlatFieldFitter(object):
         theta = result.x if result.success else theta0
         yfit = self.predict(theta, downsampled=False)
         return result, yfit
+
+
+class DarkCurrentFitter(object):
+    """
+    """
+    def __init__(self, nmax=10):
+        self.n = np.arange(nmax)
+    
+    def predict(self, theta):
+        x0, navg, spacing, c0, c1, c2 = theta
+        P = scipy.stats.poisson.pmf(self.n, mu=navg)
+        y = np.zeros_like(self.x)
+        for i, mu in enumerate(self.n * spacing + x0):
+            rms = c0 + c1 * mu + c2 * mu ** 2
+            y += P[i] * scipy.stats.norm.pdf(self.x, loc=mu, scale=rms)
+        return y / y.sum() * self.norm
+    
+    def nll(self, theta, x, ydata):
+        ypred = self.predict(theta)
+        return 0.5 * np.sum((ydata - ypred) ** 2)
+    
+    def fit(self, x, ydata, verbose=True):
+        self.x = x
+        self.norm = ydata.sum()
+        # Find approximate locations of local maxima as zeros of the gradient
+        # of the smoothed data.
+        ysmooth = scipy.signal.convolve(ydata, np.ones(5), mode='same')
+        sdy = np.sign(np.gradient(ysmooth))
+        ymax = (sdy[:-1] > 0) & (sdy[1:] < 0) & (ysmooth[:-1] > 0.2 * ysmooth.max())
+        xmax = x[np.where(ymax)[0] + 1]
+        # Set initial fit parameters.
+        spacing = xmax[1] - xmax[0]
+        theta0 = [xmax[0], 2.1, spacing, 7.4, 0.06, 0.0]
+        result = scipy.optimize.minimize(self.nll, theta0, args=(x, ydata), method='Nelder-Mead',
+                                         options=dict(maxiter=10000, xatol=1e-3, fatol=1e-3, disp=False))
+        theta = result.x if result.success else theta0
+        if verbose:
+            print(result.message)
+            print(theta)
+        return self.predict(theta), theta
