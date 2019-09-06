@@ -35,12 +35,13 @@ class SkyCameraAnalysis(object):
     search_steps : int
         Number of search grid points to use covering the search region.
     """
-    def __init__(self, nx=3072, ny=2047, binning=1,
+    def __init__(self, nx=3072, ny=2047, binning=1, invgain=1.5,
                  fiberdiam_um=107., pixelsize_um=9., blur_um=5.,
                  margin=2.0, search_pix=14, search_steps=29):
         self.ny = ny
         self.nx = nx
         self.binning = binning
+        self.invgain = invgain
         if binning not in (1, 2, 3):
             raise ValueError('Expected binning in (1, 2, 3).')
         # Convert fiber diameter and blur to (unbinned) pixels.
@@ -160,7 +161,7 @@ class SkyCameraAnalysis(object):
         if np.count_nonzero(~self.mask) != len(self.fibers) * (2 * self.rsize + 1) ** 2:
             raise ValueError('Fiber location constraints are violated.')
         
-    def get_fiber_fluxes(self, data):
+    def get_fiber_fluxes(self, data, exptime):
         """Estimate fiber fluxes and SNR values.
         
         Scans the search window for each fiber to identify the maximum
@@ -178,14 +179,16 @@ class SkyCameraAnalysis(object):
         ----------
         data : array
             2D array of image data with shape (ny, nx).
+        exptime : float
+            Exposure time in seconds.
 
         Returns
         -------
         dict
             A dictionary of per-fiber results using the fiber labels as keys.
             Each entry provides (xfit, yfit, bgmean, fiber_flux, snr, stamp) where
-            (xfit, yfit) are in units of unbinned pixels, (bgmean, fiber_flux)
-            are in units of ADUs, SNR is as described above, and stamp is a copy
+            (xfit, yfit) are in units of unbinned pixels, bgmean is in units of ADUs,
+            fiber_flux is in elec/sec, SNR is as described above, and stamp is a copy
             of the postage stamp used for each fiber.
         """
         if self.fibers is None:
@@ -228,6 +231,8 @@ class SkyCameraAnalysis(object):
             yfit = y + self.dxy[jbest[k]] * self.binning
             bgmean, fiber_flux = params[jbest[k], ibest[k], :, k]
             snr = fiber_flux / fiber_noise
+            # Convert from ADU to elec/sec
+            fiber_flux *= self.invgain / exptime
             results[label] = (xfit, yfit, bgmean, fiber_flux, snr, stamps[k])
         # Save the results for plot_sky_camera.
         self.results = results
@@ -243,7 +248,7 @@ def init_signals(fibers, max_signal=1000., attenuation=0.95):
     return signals
 
 
-def add_fiber_signals(bg, signals, SCA, invgain=1.6, centroid_dxy=5, rng=None):
+def add_fiber_signals(bg, signals, SCA, exptime, invgain, centroid_dxy=5, rng=None):
     """Add simulated fiber signals to a background image.
     """
     SCA.validate(bg)
@@ -263,10 +268,9 @@ def add_fiber_signals(bg, signals, SCA, invgain=1.6, centroid_dxy=5, rng=None):
         xfiber /= SCA.binning
         yfiber /= SCA.binning
         # Generate the number of detected electrons to use.
-        nelec_mean = signals[label] * invgain
-        nelec_det = rng.poisson(lam=nelec_mean)
-        # Save true detected signal in ADU for this fiber.
-        truth[label] = nelec_det / invgain
+        nelec_det = rng.poisson(lam=signals[label] * exptime)
+        # Save true detected signal rate in elec/sec for this fiber.
+        truth[label] = nelec_det / exptime
         # Generate electron positions w/o blur.
         r = 0.5 * SCA.fiberdiam / SCA.binning * np.sqrt(rng.uniform(size=nelec_det))
         phi = 2 * np.pi * rng.uniform(size=nelec_det)

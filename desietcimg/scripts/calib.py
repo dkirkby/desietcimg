@@ -160,16 +160,17 @@ def etccalib():
                 print('Loading zero frames...')
             raw, meta = load_raw(zero_paths, 'EXPTIME', 'SET-TEMP', verbose=args.verbose)
             CA.process_zeros(raw, refine='auto', verbose=args.verbose)
+        if nflat > 0:
+            if args.verbose:
+                print('Loading flat frames...')
+            raw, meta = load_raw(flat_paths, 'SET-TEMP', verbose=args.verbose)
+            downsampling = {1: 64, 2:32, 3:16}[args.binning]
+            CA.process_flats(raw, downsampling=downsampling, verbose=args.verbose)
         if ndark > 0:
             if args.verbose:
                 print('Loading dark frames...')
             raw, meta = load_raw(dark_paths, 'EXPTIME', 'SET-TEMP', verbose=args.verbose)
             CA.process_darks(raw, meta['SET-TEMP'], meta['EXPTIME'], verbose=args.verbose)
-        if nflat > 0:
-            if args.verbose:
-                print('Loading flat frames...')
-            raw, meta = load_raw(flat_paths, 'SET-TEMP', verbose=args.verbose)
-            CA.process_flats(raw, verbose=args.verbose)
         # Save the results.
         if not args.outpath.endswith('.fits'):
             args.outpath = str(outpath / 'stxl-calib.fits')

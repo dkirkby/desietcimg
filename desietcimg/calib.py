@@ -89,9 +89,13 @@ class CalibrationAnalysis(object):
         self.dark_exptime = exptime
         self.dark_nexp = np.count_nonzero(ok)
         self.darktheta, self.darkdata = self.dark_current_analysis(raw, verbose=verbose)
+        self.dark_current = (self.avgdark - self.avgbias) * self.flatinvgain / self.dark_exptime
+        if verbose:
+            print('{0} dark current = {1:.3f} elec/sec at {2:.1f}C'
+                  .format(self.name, self.dark_current, self.dark_temperature))
         self.have_darks = True
 
-    def process_flats(self, raw, gain_guess=1.5, downsampling=32, verbose=True):
+    def process_flats(self, raw, downsampling=32, gain_guess=1.5, verbose=True):
         """
         """
         if not self.have_zeros:
@@ -114,6 +118,8 @@ class CalibrationAnalysis(object):
         mu = np.concatenate(mu_all)
         var = np.concatenate(var_all)
         self.flatinvgain = 1 / np.linalg.lstsq(mu.reshape(-1, 1), var, rcond=None)[0][0]
+        if verbose:
+            print('{0} inverse gain = {1:.3f} elec/ADU'.format(self.name, self.flatinvgain))
         # Package the mu,var values into a recarray.
         self.flatdata = np.empty(len(mu), dtype=[('mu', np.float32), ('var', np.float32),])
         self.flatdata['mu'] = mu
@@ -144,6 +150,7 @@ class CalibrationAnalysis(object):
                     DKTEMP=self.dark_temperature,
                     DKTIME=self.dark_exptime,
                     DKNEXP=self.dark_nexp,
+                    DKCURR=self.dark_current,
                     DKX0=x0,
                     DKNAVG=navg,
                     DKDX=spacing,
@@ -190,6 +197,7 @@ class CalibrationAnalysis(object):
                 CA.dark_temperature = meta['DKTEMP']
                 CA.dark_exptime = meta['DKTIME']
                 CA.dark_nexp = meta['DKNEXP']
+                CA.dark_current = meta['DKCURR']
                 CA.darktheta = meta['DKX0'], meta['DKNAVG'], meta['DKDX'],meta['DKC0'], meta['DKC1'], meta['DKC2']
                 CA.pixmu = hdus['MU'].read().copy()
                 CA.darkdata = hdus['DRKDAT'].read().copy()

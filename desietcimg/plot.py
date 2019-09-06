@@ -95,7 +95,7 @@ def plot_sky_camera(SCA, size=4, pad=0.02, labels=True, params=True):
         if labels:
             ax.text(0.5, 0.95, label, fontsize=16, **kwargs)
         if params:
-            params = '{0:.1f} ADU SNR {1:.1f}'.format(fiber_flux, snr)
+            params = '{0:.1f} e/s SNR {1:.1f}'.format(fiber_flux, snr)
             ax.text(0.5, 0.05, params, fontsize=14, **kwargs)
     return A
 
@@ -177,21 +177,24 @@ def plot_psf_profile(GCR, size=4, pad=0.5, inset_size=35, max_ang=2.0, label=Non
     rhs.set_xlabel('Offset from PSF center [arcsec]')
 
 
-def plot_full_frame(D, W=None, downsampling=8, clip_pct=0.5, dpi=100, GCR=None,
-                    label=None, cmap='plasma_r', fg_color='w'):
+def plot_full_frame(D, W=None, saturation=None, downsampling=8, clip_pct=0.5, dpi=100, GCR=None,
+                    label=None, cmap='plasma_r', fg_color='w', compress=True):
     # Convert to a float32 array.
-    D, W = desietcimg.util.prepare(D, W)
+    D, W = desietcimg.util.prepare(D, W, saturation=saturation)
     # Downsample.
     WD = desietcimg.util.downsample(D * W, downsampling=downsampling, summary=np.sum, allow_trim=True)
     W = desietcimg.util.downsample(W, downsampling=downsampling, summary=np.sum, allow_trim=True)
     D = np.divide(WD, W, out=np.zeros_like(WD), where=W > 0)
-    # Select background pixels using sigma clipping.
-    sel = W > 0 if W is not None else (slice(None), slice(None))
-    clipped, _, _ = scipy.stats.sigmaclip(D[sel])
-    # Subtract the clipped mean from the data.
-    bgmean = np.mean(clipped)
-    bgrms = np.std(clipped)
-    Z = np.arcsinh((D - bgmean) / bgrms)
+    if compress:
+        # Select background pixels using sigma clipping.
+        sel = W > 0 if W is not None else (slice(None), slice(None))
+        clipped, _, _ = scipy.stats.sigmaclip(D[sel])
+        # Subtract the clipped mean from the data.
+        bgmean = np.mean(clipped)
+        bgrms = np.std(clipped)
+        Z = np.arcsinh((D - bgmean) / bgrms)
+    else:
+        Z = D
     vmin, vmax = np.percentile(Z.reshape(-1), (clip_pct, 100 - clip_pct))
     ny, nx = D.shape
     fig = plt.figure(figsize=(nx / dpi, ny / dpi), dpi=dpi, frameon=False)
