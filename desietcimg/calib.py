@@ -436,3 +436,67 @@ class CalibrationAnalysis(object):
         data['yavg'] = mean_hist
         data['yfit'] = yfit
         return theta, data
+
+    def simulate(self, exptime=1, signal=0, pixbias=True, pixdark=True, pixmask=True,
+                 dtype=np.uint16, rng=None):
+        """Simulate an image for a sensor with this calibration.
+
+        Parameters
+        ----------
+        exptime : float
+            Exposure time in seconds to simulate.
+        signal : float or array
+            A constant or per-pixel array of mean signal rates in elec/sec.
+        pixbias : bool
+            Simulate per-pixel variations in bias values when True, or otherwise use the
+            average bias for all pixels.
+        pixdark : bool
+            Simulate per-pixel variations in dark currents when True, or otherwise use the
+            average dark current for all pixels.
+        pixmask : bool
+            Saturate masked pixels when True.  Otherwise, all pixels have valid data.
+        dtype : numpy datatype
+            Integral data type of the image to return.
+        rng : numpy random state or None
+            Use the specified random state for reproducible random numbers, or otherwise
+            create and use a new state.
+
+        Returns
+        -------
+        array
+            2D array of simulated data with self.shape and the specified dtype.
+        """
+        # Initialize the mean signal in electrons/sec.
+        signal = np.asarray(signal)
+        if signal.shape == self.shape:
+            mu = signal.copy()
+        elif signal.shape == ():
+            mu = np.full(self.shape, signal, dtype=float)
+        else:
+            raise ValueError('Invalid signal shape: {0}.'.format(signal.shape))
+        # Convert to integrated mean electrons.
+        mu *= exptime
+        # Add the mean dark current in electrons.
+        if pixdark:
+            mu += np.maximum(0, self.pixmu - self.pixbias) * exptime / self.dark_exptime * self.flatinvgain
+        else:
+            mu += self.dark_current * exptime
+        # Convert to ADU.
+        mu /= self.flatinvgain
+        # Calculate the per-pixel variance in ADU**2.
+        var = self.flatinvgain * mu + self.rdnoise ** 2
+        # Add bias.
+        if pixbias:
+            mu += self.pixbias
+        else:
+            mu += self.avgbias
+        # Generate a random sample.
+        if rng is None:
+            rng = np.random.RandomState()
+        data = rng.normal(loc=mu, scale=np.sqrt(var))
+        # Convert to the output datatype.
+        data = np.round(data).astype(dtype)
+        if pixmask:
+            # Set masked pixels to a saturated value.
+            data[self.pixmask != 0] = np.iinfo(dtype).max
+        return data
