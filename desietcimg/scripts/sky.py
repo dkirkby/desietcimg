@@ -51,16 +51,7 @@ def simulate():
     CA = CalibrationAnalysis.load(args.calib)
 
     # Initialize an analyzer.
-    ny, nx = CA.shape
-    if nx == 3072:
-        binning = 1
-    elif nx == 1536:
-        binning = 2
-    elif nx == 1024:
-        binning = 3
-    else:
-        raise RuntimeError('Unable to infer binning from nx={0}.'.format(nx))
-    SCA = desietcimg.sky.SkyCameraAnalysis(nx * binning, ny * binning, binning, CA.flatinvgain)
+    SCA = desietcimg.sky.SkyCameraAnalysis(CA)
     SCA.load_fiber_locations(args.fibers)
 
     if args.nstudy > 1:

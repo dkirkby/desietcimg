@@ -16,12 +16,8 @@ class SkyCameraAnalysis(object):
     
     Parameters
     ----------
-    nx : int
-        Number of columns in a full frame image with no binning.
-    ny : int
-        Number of rows in a full frame image with no binning.
-    binning : int
-        Binning of the images to process. Must be in (1, 2, 3).
+    calib : desietcimg.calib.CalibrationAnalysis
+        Calibration results for camera data to analyze.
     fiberdiam_um : float
         Fiber diameter in microns.
     pixelsize_um : float
@@ -35,15 +31,21 @@ class SkyCameraAnalysis(object):
     search_steps : int
         Number of search grid points to use covering the search region.
     """
-    def __init__(self, nx=3072, ny=2047, binning=1, invgain=1.5,
-                 fiberdiam_um=107., pixelsize_um=9., blur_um=5.,
+    def __init__(self, calib, fiberdiam_um=107., pixelsize_um=9., blur_um=5.,
                  margin=2.0, search_pix=14, search_steps=29):
-        self.ny = ny
-        self.nx = nx
+        ny, nx = calib.shape
+        if nx == 3072:
+            binning = 1
+        elif nx == 1536:
+            binning = 2
+        elif nx == 1024:
+            binning = 3
+        else:
+            raise RuntimeError('Unable to infer binning from nx={0}.'.format(nx))
+        self.ny = ny * binning
+        self.nx = nx * binning
         self.binning = binning
-        self.invgain = invgain
-        if binning not in (1, 2, 3):
-            raise ValueError('Expected binning in (1, 2, 3).')
+        self.invgain = calib.flatinvgain
         # Convert fiber diameter and blur to (unbinned) pixels.
         self.fiberdiam = fiberdiam_um / pixelsize_um
         self.blur = blur_um / pixelsize_um
