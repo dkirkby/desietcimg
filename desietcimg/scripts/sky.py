@@ -29,11 +29,19 @@ def simulate():
         help='name of the JSON file with fiber locations to use')
     parser.add_argument('--calib', type=str,
         help='name of calibration analysis file to use')
+    parser.add_argument('--pixbias', action='store_true',
+        help='simulate pixel variations in bias')
+    parser.add_argument('--pixdark', action='store_true',
+        help='simulate pixel variations in dark current')
+    parser.add_argument('--pixmask', action='store_true',
+        help='simulate pixel defects')
     parser.add_argument('--saveplot', type=str, default='simskycam.png',
         help='filename where plot is saved')
     parser.add_argument('--seed', type=int, default=123,
         help='random seed to use')
     args = parser.parse_args()
+
+    rng = np.random.RandomState(args.seed)
 
     # Load the calibration analysis.
     CA = CalibrationAnalysis.load(args.calib)
@@ -51,18 +59,12 @@ def simulate():
     SCA = desietcimg.sky.SkyCameraAnalysis(nx * binning, ny * binning, binning, CA.flatinvgain)
     SCA.load_fiber_locations(args.fibers)
 
-    # Calculate the true mean signals (ADU) in each fiber.
+    # Calculate the true mean signal rates (elec/sec) in each fiber.
     true_means = init_signals(SCA.fibers, args.max_rate, args.attenuation)
 
-    # Calculate the background mean and RMS in ADU.
-    dark = CA.dark_current * args.exptime / CA.flatinvgain
-    bgmean = CA.avgbias + dark
-    bgrms = np.sqrt(CA.rdnoise ** 2 + CA.flatinvgain * CA.dark_current)
-
-    # Generate a random background frame.
-    rng = np.random.RandomState(args.seed)
-    ny, nx = SCA.ny // SCA.binning, SCA.nx // SCA.binning
-    bg = rng.normal(loc=bgmean, scale=bgrms, size=(ny, nx))
+    # Generate a random background image.
+    bg = CA.simulate(exptime=args.exptime, pixbias=args.pixbias,
+                     pixdark=args.pixdark, pixmask=args.pixmask, rng=rng)
 
     # Add random signals for each fiber.
     data, true_detected = add_fiber_signals(

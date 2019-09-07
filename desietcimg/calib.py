@@ -466,6 +466,8 @@ class CalibrationAnalysis(object):
         array
             2D array of simulated data with self.shape and the specified dtype.
         """
+        # Identify masked pixels.
+        mask = self.pixmask != 0
         # Initialize the mean signal in electrons/sec.
         signal = np.asarray(signal)
         if signal.shape == self.shape:
@@ -478,18 +480,24 @@ class CalibrationAnalysis(object):
         mu *= exptime
         # Add the mean dark current in electrons.
         if pixdark:
-            mu += np.maximum(0, self.pixmu - self.pixbias) * exptime / self.dark_exptime * self.flatinvgain
+            dark = np.maximum(0, self.pixmu - self.pixbias) * exptime / self.dark_exptime * self.flatinvgain
+            # Add the average dark current to masked pixels since the per-pixel current may not be valid.
+            dark[mask] = self.dark_current * exptime
         else:
-            mu += self.dark_current * exptime
+            dark = self.dark_current * exptime
+        mu += dark
         # Convert to ADU.
         mu /= self.flatinvgain
         # Calculate the per-pixel variance in ADU**2.
         var = self.flatinvgain * mu + self.rdnoise ** 2
         # Add bias.
         if pixbias:
-            mu += self.pixbias
+            bias = self.pixbias.copy()
+            # Add the average bias to masked pixels since the per-pixel value may not be valid.
+            bias[mask] = self.avgbias
         else:
-            mu += self.avgbias
+            bias = self.avgbias
+        mu += bias
         # Generate a random sample.
         if rng is None:
             rng = np.random.RandomState()
@@ -498,5 +506,5 @@ class CalibrationAnalysis(object):
         data = np.round(data).astype(dtype)
         if pixmask:
             # Set masked pixels to a saturated value.
-            data[self.pixmask != 0] = np.iinfo(dtype).max
+            data[mask] = np.iinfo(dtype).max
         return data
