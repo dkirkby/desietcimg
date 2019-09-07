@@ -49,6 +49,8 @@ def simulate():
     args = parser.parse_args()
 
     rng = np.random.RandomState(args.seed)
+    # Use a separate state for the background so --bgraw  does not change the signal.
+    bgrng = np.random.RandomState(args.seed)
 
     # Load the calibration analysis.
     CA = CalibrationAnalysis.load(args.calib)
@@ -88,7 +90,7 @@ def simulate():
         else:
             # Generate a random background image.
             bg = CA.simulate(exptime=args.exptime, pixbias=args.pixbias,
-                             pixdark=args.pixdark, pixmask=args.pixmask, rng=rng)
+                             pixdark=args.pixdark, pixmask=args.pixmask, rng=bgrng)
 
         # Add random signals for each fiber.
         data, true_detected = add_fiber_signals(

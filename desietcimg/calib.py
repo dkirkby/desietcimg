@@ -63,7 +63,7 @@ class CalibrationAnalysis(object):
         nok = np.count_nonzero(ok)
         fitok, self.avgbias, self.rdnoise, self.zerodata = self.fit_pedestal(
             raw[ok], verbose=verbose)
-        mask, self.pixbias = self.mask_defects(raw[ok], self.avgbias, self.rdnoise, verbose=verbose)
+        mask, self.pixbias = self.mask_defects(raw[ok], self.avgbias, self.rdnoise, nsig=5, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.ZERO_MASK)
         if refine == 'auto':
             refine = self.rdnoise / np.sqrt(nok) < np.std(self.pixbias[self.pixmask == 0])
@@ -83,7 +83,7 @@ class CalibrationAnalysis(object):
             print('== {0} darks analysis:'.format(self.name))
         ok = self.check_consistency(raw, self.pixmask > 0, verbose=verbose)
         fitok, self.avgdark, self.stddark, _ = self.fit_pedestal(raw[ok], verbose=verbose)
-        mask, self.pixmu = self.mask_defects(raw[ok], self.avgdark, self.stddark, nsig=50, verbose=verbose)
+        mask, self.pixmu = self.mask_defects(raw[ok], self.avgdark, self.stddark, nsig=15, verbose=verbose)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_MASK)
         self.dark_temperature = temperature
         self.dark_exptime = exptime

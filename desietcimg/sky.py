@@ -46,7 +46,7 @@ class SkyCameraAnalysis(object):
         self.nx = nx * binning
         self.binning = binning
         self.invgain = calib.flatinvgain
-        self.mask = (calib.pixmask != 0)
+        self.pixmask = (calib.pixmask != 0)
         # Convert fiber diameter and blur to (unbinned) pixels.
         self.fiberdiam = fiberdiam_um / pixelsize_um
         self.blur = blur_um / pixelsize_um
@@ -154,14 +154,14 @@ class SkyCameraAnalysis(object):
         with open(path, 'r') as f:
             self.fibers = json.load(f, object_pairs_hook=collections.OrderedDict)
         # Build a mask to select background pixels for noise measurement.
-        self.mask = np.ones((self.ny // self.binning, self.nx // self.binning), bool)
+        self.fibermask = np.ones((self.ny // self.binning, self.nx // self.binning), bool)
         for (x, y) in self.fibers.values():
             x //= self.binning
             y //= self.binning
             xlo, ylo = x  - self.rsize, y - self.rsize
             xhi, yhi = x + self.rsize + 1, y + self.rsize + 1
-            self.mask[ylo:yhi, xlo:xhi] = False
-        if np.count_nonzero(~self.mask) != len(self.fibers) * (2 * self.rsize + 1) ** 2:
+            self.fibermask[ylo:yhi, xlo:xhi] = False
+        if np.count_nonzero(~self.fibermask) != len(self.fibers) * (2 * self.rsize + 1) ** 2:
             raise ValueError('Fiber location constraints are violated.')
 
     def get_fiber_fluxes(self, data, exptime):
@@ -198,7 +198,7 @@ class SkyCameraAnalysis(object):
             raise RuntimeError('No fiber locations specified yet.')
         data = self.validate(data)
         # Estimate total noise over a fiber.
-        noise_pixels, _, _ = scipy.stats.sigmaclip(data[self.mask])
+        noise_pixels, _, _ = scipy.stats.sigmaclip(data[self.fibermask & ~self.pixmask])
         fiber_noise = np.sqrt(self.fiber_area * np.var(noise_pixels))
         # Assemble all fiber stamps into a single data array D.
         ssize = 2 * self.rsize + 1
@@ -213,7 +213,7 @@ class SkyCameraAnalysis(object):
             sx = slice(ix - self.rsize, ix + self.rsize + 1)
             stamp = data[sy, sx].copy()
             # Mask bad pixels.
-            mask = self.mask[sy, sx]
+            mask = self.pixmask[sy, sx]
             stamp[mask] = 0
             D[:, k] = stamp.reshape(-1)
             stamps.append(stamp)

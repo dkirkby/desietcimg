@@ -70,7 +70,7 @@ def plot_sky_camera(SCA, size=4, pad=0.02, labels=True, params=True):
     fibers = iter(SCA.fibers.values())
     # Use the same colorscale for all stamps.
     allpixels = np.concatenate([result[-1] for result in SCA.results.values()], axis=1).flatten()
-    vmin, vmax = np.percentile(allpixels, (1, 99))
+    vmin, vmax = np.percentile(allpixels[allpixels > 0], (1, 99))
     for k in range(nfibers):
         ax = A.axes[k]
         ix, iy = next(fibers)
