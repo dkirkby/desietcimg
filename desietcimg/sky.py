@@ -253,9 +253,11 @@ def add_fiber_signals(bg, signals, SCA, exptime, invgain, centroid_dxy=5, rng=No
     """
     SCA.validate(bg)
     rng = rng or np.random.RandomState()
-    # Construct pixel bin edges.
-    ny, nx = bg.shape
-    bins = (np.arange(nx + 1) - 0.5, np.arange(ny + 1) - 0.5)
+    # Define fiber radial profile.
+    profile = functools.partial(
+        desietcimg.util.fiber_profile, r0=0.5 * SCA.fiberdiam / SCA.binning, blur=SCA.blur / SCA.binning)
+    # Initialize a postage stamp that covers each fiber.
+    ssize = 2 * SCA.rsize + 1
     # Loop over fibers.
     data = bg.copy()
     truth = collections.OrderedDict()
@@ -267,20 +269,18 @@ def add_fiber_signals(bg, signals, SCA, exptime, invgain, centroid_dxy=5, rng=No
         # Convert to binned pixel coordinates.
         xfiber /= SCA.binning
         yfiber /= SCA.binning
-        # Generate the number of detected electrons to use.
-        nelec_det = rng.poisson(lam=signals[label] * exptime)
-        # Save true detected signal rate in elec/sec for this fiber.
-        truth[label] = nelec_det / exptime
-        # Generate electron positions w/o blur.
-        r = 0.5 * SCA.fiberdiam / SCA.binning * np.sqrt(rng.uniform(size=nelec_det))
-        phi = 2 * np.pi * rng.uniform(size=nelec_det)
-        x0 = xfiber + r * np.cos(phi)
-        y0 = yfiber + r * np.sin(phi)
-        # Apply blur.
-        x = rng.normal(loc=x0, scale=SCA.blur / SCA.binning)
-        y = rng.normal(loc=y0, scale=SCA.blur / SCA.binning)
-        # Bin in pixels.
-        pixels, _, _ = np.histogram2d(x, y, bins=bins)
-        # Convert to ADUs and add to the final image.
-        data += np.round(pixels.T / invgain).astype(data.dtype)
+        # Find the nearest binned pixel center.
+        ix, iy = int(round(xfiber)), int(round(yfiber))
+        # Calculate the mean fraction of photons in each postage stamp pixel.
+        frac = desietcimg.util.make_template(
+            ssize, profile, dx=xfiber - ix, dy=yfiber - iy,
+            oversampling=10 * SCA.binning, normalized=True)
+        # Generate a Poisson sample of detected electrons in each pixel.
+        nelec_tot = signals[label] * exptime
+        nelec = rng.poisson(lam=frac * nelec_tot)
+        # Record the true number of detected electrons.
+        truth[label] = nelec.sum() / exptime
+        # Convert to ADU and add to the background image.
+        data[iy - SCA.rsize:iy + SCA.rsize + 1,
+           ix - SCA.rsize:ix + SCA.rsize + 1] += (nelec / invgain).astype(data.dtype)
     return data, truth
