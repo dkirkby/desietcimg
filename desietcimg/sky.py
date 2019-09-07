@@ -46,7 +46,7 @@ class SkyCameraAnalysis(object):
         self.nx = nx * binning
         self.binning = binning
         self.invgain = calib.flatinvgain
-        self.pixmask = (CA.pixmask != 0)
+        self.mask = (calib.pixmask != 0)
         # Convert fiber diameter and blur to (unbinned) pixels.
         self.fiberdiam = fiberdiam_um / pixelsize_um
         self.blur = blur_um / pixelsize_um
@@ -209,8 +209,12 @@ class SkyCameraAnalysis(object):
             # Extract the stamp centered on (x, y)
             ix = x // self.binning
             iy = y // self.binning
-            stamp = data[iy - self.rsize:iy + self.rsize + 1,
-                         ix - self.rsize:ix + self.rsize + 1].copy()
+            sy = slice(iy - self.rsize, iy + self.rsize + 1)
+            sx = slice(ix - self.rsize, ix + self.rsize + 1)
+            stamp = data[sy, sx].copy()
+            # Mask bad pixels.
+            mask = self.mask[sy, sx]
+            stamp[mask] = 0
             D[:, k] = stamp.reshape(-1)
             stamps.append(stamp)
         # Loop over centroid hypotheses.

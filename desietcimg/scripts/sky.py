@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from desietcimg.sky import *
 from desietcimg.calib import *
 from desietcimg.plot import *
+from desietcimg.util import *
 
 
 def simulate():
@@ -31,6 +32,8 @@ def simulate():
         help='name of the JSON file with fiber locations to use')
     parser.add_argument('--calib', type=str,
         help='name of calibration analysis file to use')
+    parser.add_argument('--bgraw', type=str, default=None,
+        help='filename pattern for raw background images to use')
     parser.add_argument('--pixbias', action='store_true',
         help='simulate pixel variations in bias')
     parser.add_argument('--pixdark', action='store_true',
@@ -51,8 +54,19 @@ def simulate():
     CA = CalibrationAnalysis.load(args.calib)
 
     # Initialize an analyzer.
-    SCA = desietcimg.sky.SkyCameraAnalysis(CA)
+    SCA = SkyCameraAnalysis(CA)
     SCA.load_fiber_locations(args.fibers)
+
+    if args.bgraw is not None:
+        bgfiles = find_files(args.bgraw)
+        if args.verbose:
+            print('Found {0} files matching {1}.'.format(len(bgfiles), args.bgraw))
+        # Load raw background images into memory. No need to load more images
+        # than exposures we will simulate.
+        bgraw, _ = load_raw(bgfiles[:args.nstudy])
+        nbgraw = len(bgraw)
+    else:
+        nbgraw = 0
 
     if args.nstudy > 1:
         # Initialize the output file.
@@ -69,9 +83,12 @@ def simulate():
         if args.verbose and i % 100 == 0:
             print('Simulating {0} / {1}'.format(i + 1, args.nstudy))
 
-        # Generate a random background image.
-        bg = CA.simulate(exptime=args.exptime, pixbias=args.pixbias,
-                        pixdark=args.pixdark, pixmask=args.pixmask, rng=rng)
+        if nbgraw > 0:
+            bg = bgraw[i % nbgraw]
+        else:
+            # Generate a random background image.
+            bg = CA.simulate(exptime=args.exptime, pixbias=args.pixbias,
+                             pixdark=args.pixdark, pixmask=args.pixmask, rng=rng)
 
         # Add random signals for each fiber.
         data, true_detected = add_fiber_signals(
