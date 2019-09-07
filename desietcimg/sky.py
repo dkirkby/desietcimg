@@ -13,7 +13,7 @@ import desietcimg.util
 
 class SkyCameraAnalysis(object):
     """ Initialize the Sky Camera image analysis.
-    
+
     Parameters
     ----------
     calib : desietcimg.calib.CalibrationAnalysis
@@ -46,6 +46,7 @@ class SkyCameraAnalysis(object):
         self.nx = nx * binning
         self.binning = binning
         self.invgain = calib.flatinvgain
+        self.pixmask = (CA.pixmask != 0)
         # Convert fiber diameter and blur to (unbinned) pixels.
         self.fiberdiam = fiberdiam_um / pixelsize_um
         self.blur = blur_um / pixelsize_um
@@ -77,18 +78,18 @@ class SkyCameraAnalysis(object):
         if ny != self.ny // self.binning or nx != self.nx // self.binning:
             raise ValueError('Input data has unexpected shape: {0}.'.format(data.shape))
         return data
-    
+
     def find_fiber_locations(self, data, nfibers=18, savename=None):
         """Find fiber locations as the brightest points with the expected shape.
-        
+
         The algorithm convolves the data with a filter matched to the fiber size
         and will always return the requested number of locations subject to the
         constraints that no two fibers are within a stamp size of each other
         and no fiber is within rsize of the image edge.
-        
+
         To get reliable results, all fibers should have sufficiently bright images.
         The located centroids should then be accurate to ~1 binned pixel.
-        
+
         Parameters
         ----------
         data : array
@@ -100,7 +101,7 @@ class SkyCameraAnalysis(object):
             by :meth:`load_fiber_locations` when not None. Note that labels
             will be assigned in order of decreasing brightness and will not
             be matched to petal locations.
-            
+
         Returns
         -------
         tuple
@@ -135,15 +136,15 @@ class SkyCameraAnalysis(object):
             with open(savename, 'w') as f:
                 json.dump(fibers, f, indent=4)
         return xfiber, yfiber
-    
+
     def load_fiber_locations(self, name='fibers.json'):
         """Load fiber locations from a json file.
-        
+
         All fiber locations must be inset at least rsize from the image
         borders and at least 2 * rsize + 1 pixels away from other locations.
-        
+
         This method must be called before :meth:`get_fiber_fluxes`.
-        
+
         Parameters
         ----------
         name : str
@@ -162,10 +163,10 @@ class SkyCameraAnalysis(object):
             self.mask[ylo:yhi, xlo:xhi] = False
         if np.count_nonzero(~self.mask) != len(self.fibers) * (2 * self.rsize + 1) ** 2:
             raise ValueError('Fiber location constraints are violated.')
-        
+
     def get_fiber_fluxes(self, data, exptime):
         """Estimate fiber fluxes and SNR values.
-        
+
         Scans the search window for each fiber to identify the maximum
         likelihood fiber centroid position and calcualtes the corresponding
         background level and integrated fiber flux (using linear least squares).
@@ -173,10 +174,10 @@ class SkyCameraAnalysis(object):
         The signal-to-noise ratios are calculated assuming a noise of
         pixel_rms * sqrt(fiber_area) where pixel_rms is the sigma-clipped
         standard deviation of pixel values outside each fiber stamp.
-        
+
         Uses the fiber locations from the most recent call to
         :meth:`load_fiber_locations`.
-        
+
         Parameters
         ----------
         data : array
