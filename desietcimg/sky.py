@@ -203,8 +203,11 @@ class SkyCameraAnalysis(object):
         # Assemble all fiber stamps into a single data array D.
         ssize = 2 * self.rsize + 1
         nfibers = len(self.fibers)
-        D = np.empty((ssize ** 2, nfibers))
+        ##D = np.empty((ssize ** 2, nfibers))
         stamps = []
+        nsteps = len(self.T)
+        params = np.empty((nsteps, nsteps, 2, nfibers))
+        scores = np.empty((nsteps, nsteps, nfibers))
         for k, (label, (x, y)) in enumerate(self.fibers.items()):
             # Extract the stamp centered on (x, y)
             ix = x // self.binning
@@ -215,18 +218,16 @@ class SkyCameraAnalysis(object):
             # Mask bad pixels.
             mask = self.pixmask[sy, sx]
             stamp[mask] = 0
-            D[:, k] = stamp.reshape(-1)
+            ##D[:, k] = stamp.reshape(-1)
             stamps.append(stamp)
-        # Loop over centroid hypotheses.
-        nsteps = len(self.T)
-        params = np.empty((nsteps, nsteps, 2, nfibers))
-        scores = np.empty((nsteps, nsteps, nfibers))
-        for j in range(nsteps):
-            for i in range(nsteps):
-                A = np.stack((np.ones(stamp.size), self.T[j, i].reshape(-1)), axis=1)
-                # Solve the linear least-squares problem to find the mean noise and fiber flux
-                # for this centroid hypothesis, simultaneously for all fibers.
-                params[j, i], scores[j, i], _, _ = scipy.linalg.lstsq(A, D)
+            # Loop over centroid hypotheses.
+            for j in range(nsteps):
+                for i in range(nsteps):
+                    A = np.stack((np.ones(stamp.size), self.T[j, i].reshape(-1)), axis=1)
+                    A[mask.reshape(-1)] = 0
+                    # Solve the linear least-squares problem to find the mean noise and fiber flux
+                    # for this centroid hypothesis, simultaneously for all fibers.
+                    params[j, i, :, k], scores[j, i, k], _, _ = scipy.linalg.lstsq(A, stamp.reshape(-1))
         # Find the maximum likelihood centroid for each stamp.
         idx = np.argmin(scores.reshape(nsteps ** 2, nfibers), axis=0)
         jbest, ibest = np.unravel_index(idx, (nsteps, nsteps))
