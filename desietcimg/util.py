@@ -372,7 +372,7 @@ def find_files(pattern, min=None, max=None, check_parent=True):
     return selected
 
 
-def load_raw(files, *keys, hdu=0, verbose=False):
+def load_raw(files, *keys, hdu=0, slices=None, verbose=False):
     """ Load a sequence of raw data from FITS files into a single array.
 
     Parameters
@@ -386,6 +386,8 @@ def load_raw(files, *keys, hdu=0, verbose=False):
         error if a keyword is missing, as long as it is missing in all files.
     hdu : int or str
         Index or name of the HDU containing the raw data and header keywords.
+    slices : tuple or None
+        Only load the specified tuple of slices or load the full image when None.
     verbose : bool
         Print information about the raw format and metadata when True.
 
@@ -400,17 +402,19 @@ def load_raw(files, *keys, hdu=0, verbose=False):
     if '{N}' in files:
         files = find_files(files)
     nexp = len(files)
+    if slices is None:
+        slices = (slice(None), slice(None))
     for k, file in enumerate(files):
         with fitsio.FITS(file, mode='r') as hdus:
             if k == 0:
-                data = hdus[hdu].read()
+                data = hdus[hdu][slices]
                 raw = np.empty((nexp,) + data.shape, data.dtype)
                 raw[0] = data
                 if verbose:
                     print('Reading {0} files with shape {1} and dtype {2}.'
                           .format(nexp, data.shape, data.dtype))
             else:
-                raw[k] = hdus[hdu].read()
+                raw[k] = hdus[hdu][slices]
             hdr = hdus[hdu].read_header()
             meta = {key: hdr.get(key) for key in keys}
         if k == 0:
