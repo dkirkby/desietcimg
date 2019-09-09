@@ -578,7 +578,7 @@ class CalibrationAnalysis(object):
         # Convert to ADU.
         mu /= self.flatinvgain
         # Calculate the per-pixel variance in ADU**2.
-        var = self.flatinvgain * mu + self.rdnoise ** 2
+        var = mu / self.flatinvgain + self.rdnoise ** 2
         # Add bias.
         if pixbias:
             bias = self.pixbias.copy()

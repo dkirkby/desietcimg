@@ -239,7 +239,7 @@ class SkyCameraAnalysis(object):
                     # Look up the template model for this centroid.
                     M = self.T[j, i]
                     # Estimate the inverse variance for this centroid hypothesis.
-                    W = 1 / (noise_var + self.invgain * f0 * M)
+                    W = 1 / (noise_var +  f0 * M / self.invgain)
                     W[mask] = 0
                     # Construct the weighted linear least squares problem.
                     w = np.sqrt(W)
