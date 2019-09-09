@@ -47,7 +47,8 @@ class SkyCameraAnalysis(object):
         self.binning = binning
         self.invgain = calib.flatinvgain
         self.pixmask = (calib.pixmask != 0)
-        self.pixmu = calib.pixmu.copy()
+        self.darkmu = calib.darkmu.copy()
+        self.darkvar = calib.darkvar.copy()
         # Convert fiber diameter and blur to (unbinned) pixels.
         self.fiberdiam = fiberdiam_um / pixelsize_um
         self.blur = blur_um / pixelsize_um
@@ -222,7 +223,7 @@ class SkyCameraAnalysis(object):
             fslice = self.fiberslice[k]
             stamp = data[fslice].astype(float)
             # Subtract the per-pixel average dark.
-            stamp -= self.pixmu[fslice]
+            stamp -= self.darkmu[fslice]
             # Mask bad pixels.
             mask = self.pixmask[fslice]
             stamp[mask] = 0

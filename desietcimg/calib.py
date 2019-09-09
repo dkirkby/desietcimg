@@ -76,23 +76,28 @@ class CalibrationAnalysis(object):
                   .format(self.name, self.rdnoise, self.avgbias))
         self.have_zeros = True
 
-    def process_darks(self, raw, temperature, exptime, verbose=True):
+    def process_darks(self, raw, temperature, exptime, fit=False, verbose=True):
+        """
+        """
         if not self.have_zeros:
             raise RuntimeError('Must call process_zeros before process_darks.')
         if verbose:
             print('== {0} darks analysis:'.format(self.name))
         ok = self.check_consistency(raw, self.pixmask > 0, verbose=verbose)
-        fitok, self.avgdark, self.stddark, _ = self.fit_pedestal(raw[ok], verbose=verbose)
-        mask, self.pixmu = self.mask_defects(raw[ok], self.avgdark, self.stddark, nsig=15, verbose=verbose)
+        self.darkmu, self.darkvar, mask = self.calculate_dark_stats(raw[ok])
+        self.avgdark = np.mean(self.darkmu)
         self.pixmask[mask] |= (1 << CalibrationAnalysis.DARK_MASK)
         self.dark_temperature = temperature
         self.dark_exptime = exptime
         self.dark_nexp = np.count_nonzero(ok)
-        self.darktheta, self.darkdata = self.dark_current_analysis(raw, verbose=verbose)
         self.dark_current = (self.avgdark - self.avgbias) * self.flatinvgain / self.dark_exptime
         if verbose:
             print('{0} dark current = {1:.3f} elec/sec at {2:.1f}C'
                   .format(self.name, self.dark_current, self.dark_temperature))
+        if fit:
+            self.darktheta, self.darkdata = self.dark_current_analysis(raw[ok], verbose=verbose)
+        else:
+            self.darkdata = None
         self.have_darks = True
 
     def process_flats(self, raw, downsampling=32, gain_guess=1.5, verbose=True):
@@ -143,21 +148,23 @@ class CalibrationAnalysis(object):
                 FLATS=self.have_flats,
             )
             if self.have_darks:
-                x0, navg, spacing, c0, c1, c2 = self.darktheta
                 meta.update(dict(
                     AVGDARK=self.avgdark,
-                    STDDARK=self.stddark,
                     DKTEMP=self.dark_temperature,
                     DKTIME=self.dark_exptime,
                     DKNEXP=self.dark_nexp,
                     DKCURR=self.dark_current,
-                    DKX0=x0,
-                    DKNAVG=navg,
-                    DKDX=spacing,
-                    DKC0=c0,
-                    DKC1=c1,
-                    DKC2=c2,
                 ))
+                if self.darkdata is not None:
+                    x0, navg, spacing, c0, c1, c2 = self.darktheta
+                    meta.update(dict(
+                        DKX0=x0,
+                        DKNAVG=navg,
+                        DKDX=spacing,
+                        DKC0=c0,
+                        DKC1=c1,
+                        DKC2=c2,
+                    ))
             if self.have_flats:
                 meta.update(dict(
                     FLATG=self.flatinvgain,
@@ -168,10 +175,11 @@ class CalibrationAnalysis(object):
             # Write image data.
             hdus.write(self.pixbias, extname='BIAS')
             if self.have_darks:
-                hdus.write(self.pixmu, extname='MU')
+                hdus.write(self.darkmu, extname='DKMU')
+                hdus.write(self.darkvar, extname='DKVAR')
             # Write table data.
             hdus.write(self.zerodata, extname='ZERDAT')
-            if self.have_darks:
+            if self.have_darks and self.darkdata is not None:
                 hdus.write(self.darkdata, extname='DRKDAT')
             if self.have_flats:
                 hdus.write(self.flatdata, extname='FLTDAT')
@@ -193,14 +201,17 @@ class CalibrationAnalysis(object):
             CA.zerodata = hdus['ZERDAT'].read().copy()
             if CA.have_darks:
                 CA.avgdark = meta['AVGDARK']
-                CA.stddark = meta['STDDARK']
                 CA.dark_temperature = meta['DKTEMP']
                 CA.dark_exptime = meta['DKTIME']
                 CA.dark_nexp = meta['DKNEXP']
                 CA.dark_current = meta['DKCURR']
-                CA.darktheta = meta['DKX0'], meta['DKNAVG'], meta['DKDX'],meta['DKC0'], meta['DKC1'], meta['DKC2']
-                CA.pixmu = hdus['MU'].read().copy()
-                CA.darkdata = hdus['DRKDAT'].read().copy()
+                CA.darkmu = hdus['DKMU'].read().copy()
+                CA.darkvar = hdus['DKVAR'].read().copy()
+                if 'DRKDAT' in hdus:
+                    CA.darkdata = hdus['DRKDAT'].read().copy()
+                    CA.darktheta = meta['DKX0'], meta['DKNAVG'], meta['DKDX'],meta['DKC0'], meta['DKC1'], meta['DKC2']
+                else:
+                    CA.darkdata = None
             if CA.have_flats:
                 CA.flatinvgain = meta['FLATG']
                 CA.flatdata = hdus['FLTDAT'].read().copy()
@@ -397,6 +408,84 @@ class CalibrationAnalysis(object):
             var.append(np.var(DY[good]) - rdnoise ** 2)
         return np.array(mu), np.array(var)
 
+    def calculate_dark_stats(self, raw, pcut=1e-3, ncut_max_frac=0.01, verbose=True):
+        """Identify good pixels and estimate their mean and variance.
+
+        The main tool for identifing a good pixel is the Shapiro-Wilkes
+        test, which provides a pvalue in the range (0,1).
+
+        Pixels are considered good if they pass pvalue > pcut after
+        dropping at most ncut_max_frac of the exposures, and their
+        resulting mean and variance are compatible with the inverse
+        gain measured for this sensor.
+
+        Parameters
+        ----------
+        raw : array
+            3D array of raw data with shape (nexp, ny, nx)
+        pcut : float
+            Prune high outliers (likely cosmics) until each pixel
+            reaches pvalue > pcut, or else the number of outliers
+            exceeds ncut_max_frac * nexp.
+        ncut_max_frac : float
+            Maximum fraction of exposures that can be cut for each pixel
+            before giving up and masking it.
+
+        Returns
+        -------
+        tuple
+            Tuple (mu, var, mask) of 2D arrays with shape (ny, nx) giving
+            the mean in ADU, variance in ADU ** 2 and a boolean mask of
+            bad pixels.
+        """
+        nexp, ny, nx = raw.shape
+        ncut_max = int(np.ceil(ncut_max_frac * nexp))
+        mu = np.zeros((ny, nx))
+        var = np.zeros((ny, nx))
+        mask = np.zeros((ny, nx), bool)
+        for iy in range(ny):
+            for ix in range(nx):
+                pixdata = raw[:, iy, ix]
+                if np.min(pixdata) == np.max(pixdata):
+                    # All pixel values the same.
+                    mask[iy, ix] = True
+                    continue
+                ncut = 0
+                pvalue = 0.
+                good = np.ones(nexp, bool)
+                _, pvalue = scipy.stats.shapiro(pixdata)
+                idx = np.argsort(pixdata)
+                while pvalue <= pcut and ncut < ncut_max:
+                    # Cut the largest remaining value.
+                    ncut += 1
+                    good[idx[nexp - ncut]] = False
+                    pixdata = raw[good, iy, ix]
+                    # Update the pvalue.
+                    if np.min(pixdata) == np.max(pixdata):
+                        # All pixel values the same after masking outliers.
+                        pvalue = 0.
+                        break
+                    _, pvalue = scipy.stats.shapiro(pixdata)
+                if pvalue > pcut:
+                    mu[iy, ix] = np.mean(raw[good, iy, ix])
+                    var[iy, ix] = np.var(raw[good, iy, ix])
+                else:
+                    # Unable to get below pcut after masking outliers.
+                    mask[iy, ix] = True
+
+        # Mask any pixels that fall outside the expected gain curve.
+        x = np.zeros((ny, nx))
+        y = np.zeros((ny, nx))
+        x[~mask] = mu[~mask] - self.avgbias
+        y[~mask] = var[~mask] - self.rdnoise ** 2
+        ylo = x / (1.1 * self.flatinvgain) - 2 * self.rdnoise ** 2
+        yhi = x / (0.9 * self.flatinvgain) + 2 * self.rdnoise ** 2    
+        mask[(y < ylo) | (y > yhi)] = True
+        if verbose:
+            print('Median dark current = {0:.3f} ADU, {1:.3f}% pixels masked.'
+                  .format(np.median(x[~mask]), 100 * np.count_nonzero(mask) / (ny * nx)))
+        return mu, var, mask
+
     def dark_current_analysis(self, raw, nbins=500, clip=(0.1, 95), verbose=True):
 
         nexp, maxval = self.validate(raw)
@@ -413,7 +502,7 @@ class CalibrationAnalysis(object):
         bins = np.linspace(lo, hi, nbins + 1)
 
         # Histogram the means.
-        signal = self.pixmu - self.pixbias
+        signal = self.darkmu - self.pixbias
         mean_hist, _ = np.histogram(signal, bins)
 
         # Histogram each exposure.
@@ -480,7 +569,7 @@ class CalibrationAnalysis(object):
         mu *= exptime
         # Add the mean dark current in electrons.
         if pixdark:
-            dark = np.maximum(0, self.pixmu - self.pixbias) * exptime / self.dark_exptime * self.flatinvgain
+            dark = np.maximum(0, self.darkmu - self.pixbias) * exptime / self.dark_exptime * self.flatinvgain
             # Add the average dark current to masked pixels since the per-pixel current may not be valid.
             dark[mask] = self.dark_current * exptime
         else:

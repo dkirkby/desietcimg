@@ -222,7 +222,7 @@ def plot_calib_frame(CA, what='bias', downsampling=4, cmap='viridis', masked_col
     cmap = matplotlib.cm.get_cmap(cmap)
     cmap.set_bad(color=masked_color)
     if what in ('bias', 'mu'):
-        D = CA.pixbias.copy() if what == 'bias' else CA.pixmu.copy()
+        D = CA.pixbias.copy() if what == 'bias' else CA.darkmu.copy()
         W = np.array(CA.pixmask == 0).astype(np.float32)
         WDds = desietcimg.util.downsample(D * W, downsampling, np.sum, allow_trim=True)
         Wds = desietcimg.util.downsample(W, downsampling, np.sum, allow_trim=True)
@@ -245,7 +245,7 @@ def plot_calib_data(CA, what='zero', ax=None):
         ax.set_xlabel('Pixel Value [ADU]')
         plt.legend()
     elif what in ('pixbias', 'pixmu'):
-        data = CA.pixbias if what == 'pixbias' else CA.pixmu
+        data = CA.pixbias if what == 'pixbias' else CA.darkmu
         data = data[CA.pixmask == 0]
         bins = np.linspace(*np.percentile(data, (0.5, 99.5)), 51)
         ax.hist(data, bins)
