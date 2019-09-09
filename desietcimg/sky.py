@@ -47,6 +47,7 @@ class SkyCameraAnalysis(object):
         self.binning = binning
         self.invgain = calib.flatinvgain
         self.pixmask = (calib.pixmask != 0)
+        self.pixmu = calib.pixmu.copy()
         # Convert fiber diameter and blur to (unbinned) pixels.
         self.fiberdiam = fiberdiam_um / pixelsize_um
         self.blur = blur_um / pixelsize_um
@@ -154,17 +155,23 @@ class SkyCameraAnalysis(object):
         with open(path, 'r') as f:
             self.fibers = json.load(f, object_pairs_hook=collections.OrderedDict)
         # Build a mask to select background pixels for noise measurement.
-        self.fibermask = np.ones((self.ny // self.binning, self.nx // self.binning), bool)
+        self.bgmask = np.ones((self.ny // self.binning, self.nx // self.binning), bool)
+        self.fiberslice = []
         for (x, y) in self.fibers.values():
             x //= self.binning
             y //= self.binning
             xlo, ylo = x  - self.rsize, y - self.rsize
             xhi, yhi = x + self.rsize + 1, y + self.rsize + 1
-            self.fibermask[ylo:yhi, xlo:xhi] = False
-        if np.count_nonzero(~self.fibermask) != len(self.fibers) * (2 * self.rsize + 1) ** 2:
+            # Remember the slice for this stamp.
+            fslice = (slice(ylo, yhi), slice(xlo, xhi))
+            self.fiberslice.append(fslice)
+            self.bgmask[fslice] = False
+        if np.count_nonzero(~self.bgmask) != len(self.fibers) * (2 * self.rsize + 1) ** 2:
             raise ValueError('Fiber location constraints are violated.')
+        # Removed masked pixels from  the background.
+        self.bgmask[self.pixmask] = False
 
-    def get_fiber_fluxes(self, data, exptime):
+    def get_fiber_fluxes(self, data, exptime, maxrate=1000.):
         """Estimate fiber fluxes and SNR values.
 
         Scans the search window for each fiber to identify the maximum
@@ -184,6 +191,8 @@ class SkyCameraAnalysis(object):
             2D array of image data with shape (ny, nx).
         exptime : float
             Exposure time in seconds.
+        maxrate : float
+            Maximum expected rate for any fiber in elec/sec.
 
         Returns
         -------
@@ -198,36 +207,46 @@ class SkyCameraAnalysis(object):
             raise RuntimeError('No fiber locations specified yet.')
         data = self.validate(data)
         # Estimate total noise over a fiber.
-        noise_pixels, _, _ = scipy.stats.sigmaclip(data[self.fibermask & ~self.pixmask])
-        fiber_noise = np.sqrt(self.fiber_area * np.var(noise_pixels))
+        noise_pixels, _, _ = scipy.stats.sigmaclip(data[self.bgmask])
+        noise_var = np.var(noise_pixels)
+        fiber_noise = np.sqrt(self.fiber_area * noise_var)
         # Assemble all fiber stamps into a single data array D.
         ssize = 2 * self.rsize + 1
         nfibers = len(self.fibers)
-        ##D = np.empty((ssize ** 2, nfibers))
         stamps = []
         nsteps = len(self.T)
         params = np.empty((nsteps, nsteps, 2, nfibers))
         scores = np.empty((nsteps, nsteps, nfibers))
         for k, (label, (x, y)) in enumerate(self.fibers.items()):
             # Extract the stamp centered on (x, y)
-            ix = x // self.binning
-            iy = y // self.binning
-            sy = slice(iy - self.rsize, iy + self.rsize + 1)
-            sx = slice(ix - self.rsize, ix + self.rsize + 1)
-            stamp = data[sy, sx].copy()
+            fslice = self.fiberslice[k]
+            stamp = data[fslice].astype(float)
+            # Subtract the per-pixel average dark.
+            stamp -= self.pixmu[fslice]
             # Mask bad pixels.
-            mask = self.pixmask[sy, sx]
+            mask = self.pixmask[fslice]
             stamp[mask] = 0
-            ##D[:, k] = stamp.reshape(-1)
+            # Make a rough estimate of the fiber flux.
+            f0 = np.maximum(0., stamp.sum())
+            # Make sure this corresponds to a reasonable rate.
+            f0 = np.minimum(f0, maxrate * exptime / self.invgain)
+            # Remember this stamp for the results.
             stamps.append(stamp)
             # Loop over centroid hypotheses.
             for j in range(nsteps):
                 for i in range(nsteps):
-                    A = np.stack((np.ones(stamp.size), self.T[j, i].reshape(-1)), axis=1)
-                    A[mask.reshape(-1)] = 0
+                    # Look up the template model for this centroid.
+                    M = self.T[j, i]
+                    # Estimate the inverse variance for this centroid hypothesis.
+                    W = 1 / (noise_var + self.invgain * f0 * M)
+                    W[mask] = 0
+                    # Construct the weighted linear least squares problem.
+                    w = np.sqrt(W)
+                    A = np.stack((np.ones(stamp.size), M.reshape(-1)), axis=1) * w.reshape(-1, 1)
+                    y = (stamp * w).reshape(-1)
                     # Solve the linear least-squares problem to find the mean noise and fiber flux
-                    # for this centroid hypothesis, simultaneously for all fibers.
-                    params[j, i, :, k], scores[j, i, k], _, _ = scipy.linalg.lstsq(A, stamp.reshape(-1))
+                    # for this centroid hypothesis.
+                    params[j, i, :, k], scores[j, i, k], _, _ = scipy.linalg.lstsq(A, y)
         # Find the maximum likelihood centroid for each stamp.
         idx = np.argmin(scores.reshape(nsteps ** 2, nfibers), axis=0)
         jbest, ibest = np.unravel_index(idx, (nsteps, nsteps))

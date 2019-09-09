@@ -65,8 +65,10 @@ def simulate():
             print('Found {0} files matching {1}.'.format(len(bgfiles), args.bgraw))
         # Load raw background images into memory. No need to load more images
         # than exposures we will simulate.
-        bgraw, _ = load_raw(bgfiles[:args.nstudy])
+        bgraw, meta = load_raw(bgfiles[:args.nstudy], 'EXPTIME', 'SET-TEMP', verbose=args.verbose)
         nbgraw = len(bgraw)
+        if meta['EXPTIME'] != args.exptime:
+            print('WARNING: raw darks do not use requested EXPTIME.')
     else:
         nbgraw = 0
 
