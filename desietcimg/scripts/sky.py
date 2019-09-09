@@ -97,6 +97,7 @@ def simulate():
         # Add random signals for each fiber.
         data, true_detected = add_fiber_signals(
             bg, true_means, SCA, args.exptime, CA.flatinvgain, rng=rng)
+        truth = [true_detected[label] for label in labels]
 
         # Perform the measurement.
         measured = SCA.get_fiber_fluxes(data, args.exptime)
@@ -115,6 +116,13 @@ def simulate():
             # Save the estimated fiber fluxes.
             values = [measured[label][3] for label in labels]
             print(*values, sep=',', file=simout)
+            # Save an image if any measurements are off by more than a factor of 2.
+            ratio = np.array(values) / truth
+            if np.any((ratio > 2) | (ratio < 0.5)):
+                print(i, ratio)
+                A = plot_sky_camera(SCA)
+                plt.savefig('bad_{0}.png'.format(i))
+
 
     if args.nstudy > 1:
         simout.close()

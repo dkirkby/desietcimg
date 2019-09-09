@@ -224,6 +224,8 @@ class SkyCameraAnalysis(object):
             stamp = data[fslice].astype(float)
             # Subtract the per-pixel average dark.
             stamp -= self.darkmu[fslice]
+            # Look up the variances for this stamp.
+            stampvar = self.darkvar[fslice]
             # Mask bad pixels.
             mask = self.pixmask[fslice]
             stamp[mask] = 0
@@ -238,11 +240,13 @@ class SkyCameraAnalysis(object):
                 for i in range(nsteps):
                     # Look up the template model for this centroid.
                     M = self.T[j, i]
-                    # Estimate the inverse variance for this centroid hypothesis.
-                    W = 1 / (noise_var +  f0 * M / self.invgain)
-                    W[mask] = 0
+                    # Estimate the inverse variance for this centroid hypothesis assuming the
+                    # (fixed) rough estimate of the fiber flux.
+                    var = stampvar + f0 * M / self.invgain
+                    ivar = np.divide(1, var, out=np.zeros_like(var), where=var>0)
+                    ivar[mask] = 0
                     # Construct the weighted linear least squares problem.
-                    w = np.sqrt(W)
+                    w = np.sqrt(ivar)
                     A = np.stack((np.ones(stamp.size), M.reshape(-1)), axis=1) * w.reshape(-1, 1)
                     y = (stamp * w).reshape(-1)
                     # Solve the linear least-squares problem to find the mean noise and fiber flux
