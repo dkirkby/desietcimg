@@ -61,21 +61,28 @@ class Axes(object):
             ax.axis('off')
 
 
-def plot_sky_camera(SCA, size=4, pad=0.02, labels=True, params=True):
+def plot_sky_camera(SCA, size=4, pad=0.02, what='stamp', labels=True, params=True):
     if SCA.fibers is None or SCA.results is None:
         raise RuntimeError('No results available to plot.')
     nfibers = len(SCA.fibers)
     A = Axes(nfibers, size, pad)
+    # Extract the pixel values to plot.
+    plotdata = []
+    results = iter(SCA.results.items())
+    for k in range(nfibers):
+        label, (xfit, yfit, bgmean, fiber_flux, snr, stamp, ivar, model) = next(results)
+        plotdata.append({'stamp': stamp, 'ivar': ivar, 'model': model}[what])
+    # Use the same colorscale for all stamps.
+    allpixels = np.concatenate(plotdata, axis=1).flatten()
+    vmin, vmax = np.percentile(allpixels[allpixels > 0], (1, 99))
+    # Loop over fibers to plot.
     results = iter(SCA.results.items())
     fibers = iter(SCA.fibers.values())
-    # Use the same colorscale for all stamps.
-    allpixels = np.concatenate([result[-1] for result in SCA.results.values()], axis=1).flatten()
-    vmin, vmax = np.percentile(allpixels[allpixels > 0], (1, 99))
     for k in range(nfibers):
         ax = A.axes[k]
         ix, iy = next(fibers)
-        label, (xfit, yfit, bgmean, fiber_flux, snr, stamp) = next(results)
-        ax.imshow(stamp, interpolation='none', origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
+        label, (xfit, yfit, bgmean, fiber_flux, snr, stamp, ivar, model) = next(results)
+        ax.imshow(plotdata[k], interpolation='none', origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
         ax.axis('off')
         cx = (xfit - ix) / SCA.binning + SCA.rsize
         cy = (yfit - iy) / SCA.binning + SCA.rsize

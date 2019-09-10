@@ -207,17 +207,16 @@ class SkyCameraAnalysis(object):
         if self.fibers is None:
             raise RuntimeError('No fiber locations specified yet.')
         data = self.validate(data)
-        # Estimate total noise over a fiber.
+        # Estimate integrated noise over a fiber in ADU.
         noise_pixels, _, _ = scipy.stats.sigmaclip(data[self.bgmask])
         noise_var = np.var(noise_pixels)
         fiber_noise = np.sqrt(self.fiber_area * noise_var)
         # Assemble all fiber stamps into a single data array D.
         ssize = 2 * self.rsize + 1
         nfibers = len(self.fibers)
-        stamps = []
-        nsteps = len(self.T)
-        params = np.empty((nsteps, nsteps, 2, nfibers))
-        scores = np.empty((nsteps, nsteps, nfibers))
+        results = collections.OrderedDict()
+        # Convert maxrate to a maximum integrated signal in ADU.
+        fmax = maxrate * exptime / self.invgain
         for k, (label, (x, y)) in enumerate(self.fibers.items()):
             # Extract the stamp centered on (x, y)
             fslice = self.fiberslice[k]
@@ -228,47 +227,76 @@ class SkyCameraAnalysis(object):
             stampvar = self.darkvar[fslice]
             # Mask bad pixels.
             mask = self.pixmask[fslice]
+            # Measure the flux and background level in this fiber.
+            (dxfit, dyfit, bgfit, ffit, ivar, model) = self.measure_one_fiber(stamp, stampvar, mask, fmax)
+            # Convert offsets in binned pixels to absolute unbinned pixel coordinates.
+            xfit = x + dxfit * self.binning
+            yfit = y + dyfit * self.binning
+            # Estimate the SNR.
+            snr = ffit / fiber_noise
+            # Convert integrated flux in ADU to a rate in elec/sec.
+            fiber_flux = ffit * self.invgain / exptime
+            # Save the results of this fiber.
             stamp[mask] = 0
-            # Make a rough estimate of the fiber flux.
-            f0 = np.maximum(0., stamp.sum())
-            # Make sure this corresponds to a reasonable rate.
-            f0 = np.minimum(f0, maxrate * exptime / self.invgain)
-            # Remember this stamp for the results.
-            stamps.append(stamp)
-            # Loop over centroid hypotheses.
-            for j in range(nsteps):
-                for i in range(nsteps):
-                    # Look up the template model for this centroid.
-                    M = self.T[j, i]
-                    # Estimate the inverse variance for this centroid hypothesis assuming the
-                    # (fixed) rough estimate of the fiber flux.
-                    var = stampvar + f0 * M / self.invgain
-                    ivar = np.divide(1, var, out=np.zeros_like(var), where=var>0)
-                    ivar[mask] = 0
-                    # Construct the weighted linear least squares problem.
-                    w = np.sqrt(ivar)
-                    A = np.stack((np.ones(stamp.size), M.reshape(-1)), axis=1) * w.reshape(-1, 1)
-                    y = (stamp * w).reshape(-1)
-                    # Solve the linear least-squares problem to find the mean noise and fiber flux
-                    # for this centroid hypothesis.
-                    params[j, i, :, k], scores[j, i, k], _, _ = scipy.linalg.lstsq(A, y)
-        # Find the maximum likelihood centroid for each stamp.
-        idx = np.argmin(scores.reshape(nsteps ** 2, nfibers), axis=0)
-        jbest, ibest = np.unravel_index(idx, (nsteps, nsteps))
-        # Build the results.
-        results = collections.OrderedDict()
-        for k, (label, (x, y)) in enumerate(self.fibers.items()):
-            # Convert grid indices to unbinned pixel coordinates.
-            xfit = x + self.dxy[ibest[k]] * self.binning
-            yfit = y + self.dxy[jbest[k]] * self.binning
-            bgmean, fiber_flux = params[jbest[k], ibest[k], :, k]
-            snr = fiber_flux / fiber_noise
-            # Convert from ADU to elec/sec
-            fiber_flux *= self.invgain / exptime
-            results[label] = (xfit, yfit, bgmean, fiber_flux, snr, stamps[k])
+            results[label] = (xfit, yfit, bgfit, fiber_flux, snr, stamp, ivar, model)
         # Save the results for plot_sky_camera.
         self.results = results
         return results
+
+    def measure_one_fiber(self, stamp, stampvar, mask, fmax):
+        """Measure the integrated flux in a single fiber.
+
+        Parameters
+        ----------
+        stamp : array
+            2D array of pixel data for a stamp with dimensions (ssize, ssize).
+        stampvar : array
+            2D array of corresponding background inverse variances.
+        mask : array
+            2D array of boolean mask values.
+        exptime : float
+            Exposure time in seconds. Used to normalize the measurement as a rate.
+        maxrate : float
+            Maximum expected rate for any fiber in elec/sec.
+        """
+        # Make a rough estimate of the fiber flux.
+        f0 = max(0., stamp.sum())
+        # Make sure this corresponds to a reasonable rate.
+        f0 = min(f0, fmax)
+        # Loop over centroid hypotheses.
+        nsteps = len(self.T)
+        params = np.empty((nsteps, nsteps, 2))
+        scores = np.empty((nsteps, nsteps))
+        for j in range(nsteps):
+            for i in range(nsteps):
+                # Look up the template model for this centroid.
+                M = self.T[j, i]
+                # Estimate the inverse variance for this centroid hypothesis assuming the
+                # (fixed) rough estimate of the fiber flux.
+                var = stampvar + f0 * M / self.invgain
+                ivar = np.divide(1, var, out=np.zeros_like(var), where=var>0)
+                ivar[mask] = 0
+                # Construct the weighted linear least squares problem.
+                w = np.sqrt(ivar)
+                A = np.stack((np.ones(stamp.size), M.reshape(-1)), axis=1) * w.reshape(-1, 1)
+                y = (stamp * w).reshape(-1)
+                # Solve the weighted linear least-squares problem to find the mean background
+                # level and fiber flux for this centroid hypothesis.
+                params[j, i, :], scores[j, i], _, _ = scipy.linalg.lstsq(A, y)
+        # Find the maximum likelihood centroid.
+        idx = np.argmin(scores.reshape(nsteps ** 2))
+        jbest, ibest = np.unravel_index(idx, (nsteps, nsteps))
+        # Convert grid indices to binned pixel offsets relative to the stamp center.
+        dxfit, dyfit = self.dxy[ibest], self.dxy[jbest]
+        # Lookup the best-fit background mean in ADU and integrated fiber flux in ADU.
+        bgfit, ffit = params[jbest, ibest]
+        # Calculate the ivar for the best-fit centroid.
+        M = self.T[jbest, ibest]
+        var = stampvar + ffit * M / self.invgain
+        ivar = np.divide(1, var, out=np.zeros_like(var), where=var>0)
+        # Calculate the best-fit model.
+        model = bgfit + ffit * M
+        return (dxfit, dyfit, bgfit, ffit, ivar, model)
 
 
 def init_signals(fibers, max_signal=1000., attenuation=0.95):

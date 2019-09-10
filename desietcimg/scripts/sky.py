@@ -99,23 +99,23 @@ def simulate():
         # Add random signals for each fiber.
         data, true_detected = add_fiber_signals(
             bg, true_means, SCA, args.exptime, CA.flatinvgain, rng=rng)
-        truth = [true_detected[label] for label in labels]
 
         # Perform the measurement.
         measured = SCA.get_fiber_fluxes(data, args.exptime)
 
         if i == 0 and args.verbose:
             for label in SCA.fibers:
-                (xfit, yfit, bgmean, fiber_flux, snr, stamp) = measured[label]
+                (xfit, yfit, bgmean, fiber_flux, snr, stamp, ivar, model) = measured[label]
                 print('{0}: mean={1:.1f} det={2:.1f} fit={3:.1f} SNR={4:.1f}'.format(
                     label, true_means[label], true_detected[label], fiber_flux, snr))
 
         if i == 0 and args.saveplot:
-            A = plot_sky_camera(SCA)
+            A = plot_sky_camera(SCA, what='model')
             plt.savefig(args.saveplot)
             plt.close('all')
 
         if args.nstudy > 1:
+            truth = [true_detected[label] for label in labels]
             # Save the estimated fiber fluxes.
             values = [measured[label][3] for label in labels]
             print(*values, sep=',', file=simout)
