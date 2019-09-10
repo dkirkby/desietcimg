@@ -32,7 +32,7 @@ class SkyCameraAnalysis(object):
         Number of search grid points to use covering the search region.
     """
     def __init__(self, calib, fiberdiam_um=107., pixelsize_um=9., blur_um=5.,
-                 margin=2.0, search_pix=14, search_steps=29):
+                 margin=2.0, search_pix=10, search_steps=21):
         ny, nx = calib.shape
         if nx == 3072:
             binning = 1
@@ -335,10 +335,10 @@ def add_fiber_signals(bg, signals, SCA, exptime, invgain, centroid_dxy=5, rng=No
     ssize = 2 * SCA.rsize + 1
     # Loop over fibers.
     data = bg.copy()
+    w = 0.5 * centroid_dxy
     truth = collections.OrderedDict()
     for label, (xfiber, yfiber) in SCA.fibers.items():
         # Add some random jitter.
-        w = 0.5 * centroid_dxy
         xfiber += rng.uniform(-w, +w)
         yfiber += rng.uniform(-w, +w)
         # Convert to binned pixel coordinates.
