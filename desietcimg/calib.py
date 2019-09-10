@@ -483,8 +483,8 @@ class CalibrationAnalysis(object):
         y = np.zeros((ny, nx))
         x[~mask] = mu[~mask] - self.avgbias
         y[~mask] = var[~mask] - self.rdnoise ** 2
-        ylo = x / (1.1 * self.flatinvgain) - 2 * self.rdnoise ** 2
-        yhi = x / (0.9 * self.flatinvgain) + 2 * self.rdnoise ** 2    
+        ylo = x / (1.30 * self.flatinvgain) - 2.5 * self.rdnoise ** 2
+        yhi = x / (0.85 * self.flatinvgain) + 2.5 * self.rdnoise ** 2    
         mask[(y < ylo) | (y > yhi)] = True
         if verbose:
             print('Median dark current = {0:.3f} ADU, {1:.3f}% pixels masked after gain curve cut.'
