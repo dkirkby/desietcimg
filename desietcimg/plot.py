@@ -70,8 +70,8 @@ def plot_sky_camera(SCA, size=4, pad=0.02, what='stamp', labels=True, params=Tru
     plotdata = []
     results = iter(SCA.results.items())
     for k in range(nfibers):
-        label, (xfit, yfit, bgmean, fiber_flux, snr, stamp, ivar, model) = next(results)
-        plotdata.append({'stamp': stamp, 'ivar': ivar, 'model': model}[what])
+        label, (xfit, yfit, bgmean, fiber_flux, snr, stamp, ivar, model, raw) = next(results)
+        plotdata.append({'stamp': stamp, 'ivar': ivar, 'model': model, 'raw': raw}[what])
     # Use the same colorscale for all stamps.
     allpixels = np.concatenate(plotdata, axis=1).flatten()
     vmin, vmax = np.percentile(allpixels[allpixels > 0], (1, 99))
@@ -81,7 +81,7 @@ def plot_sky_camera(SCA, size=4, pad=0.02, what='stamp', labels=True, params=Tru
     for k in range(nfibers):
         ax = A.axes[k]
         ix, iy = next(fibers)
-        label, (xfit, yfit, bgmean, fiber_flux, snr, stamp, ivar, model) = next(results)
+        label, (xfit, yfit, bgmean, fiber_flux, snr, stamp, ivar, model, raw) = next(results)
         ax.imshow(plotdata[k], interpolation='none', origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
         ax.axis('off')
         cx = (xfit - ix) / SCA.binning + SCA.rsize

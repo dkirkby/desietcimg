@@ -105,12 +105,12 @@ def simulate():
 
         if i == 0 and args.verbose:
             for label in SCA.fibers:
-                (xfit, yfit, bgmean, fiber_flux, snr, stamp, ivar, model) = measured[label]
+                (xfit, yfit, bgmean, fiber_flux, snr, stamp, ivar, model, raw) = measured[label]
                 print('{0}: mean={1:.1f} det={2:.1f} fit={3:.1f} SNR={4:.1f}'.format(
                     label, true_means[label], true_detected[label], fiber_flux, snr))
 
         if i == 0 and args.saveplot:
-            A = plot_sky_camera(SCA, what='model')
+            A = plot_sky_camera(SCA, what='stamp')
             plt.savefig(args.saveplot)
             plt.close('all')
 
@@ -125,7 +125,7 @@ def simulate():
                 if np.any((ratio > 2) | (ratio < 0.5)):
                     print(i, ratio)
                     A = plot_sky_camera(SCA)
-                    plt.savefig('{0}_{1}.png'.format(args.badplot, i))
+                    plt.savefig('{0}_{1}.png'.format(args.badplot, i), what='stamp')
                     plt.close('all')
 
     if args.nstudy > 1:

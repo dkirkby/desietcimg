@@ -220,8 +220,9 @@ class SkyCameraAnalysis(object):
         for k, (label, (x, y)) in enumerate(self.fibers.items()):
             # Extract the stamp centered on (x, y)
             fslice = self.fiberslice[k]
-            stamp = data[fslice].astype(float)
+            raw = data[fslice].copy()
             # Subtract the per-pixel average dark.
+            stamp = raw.astype(float)
             stamp -= self.darkmu[fslice]
             # Look up the variances for this stamp.
             stampvar = self.darkvar[fslice]
@@ -238,7 +239,7 @@ class SkyCameraAnalysis(object):
             fiber_flux = ffit * self.invgain / exptime
             # Save the results of this fiber.
             stamp[mask] = 0
-            results[label] = (xfit, yfit, bgfit, fiber_flux, snr, stamp, ivar, model)
+            results[label] = (xfit, yfit, bgfit, fiber_flux, snr, stamp, ivar, model, raw)
         # Save the results for plot_sky_camera.
         self.results = results
         return results
