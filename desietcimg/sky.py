@@ -314,12 +314,11 @@ class SkyCameraAnalysis(object):
         return (dxfit, dyfit, bgfit, ffit, ivar, model)
 
 
-def init_signals(fibers, max_signal=1000., attenuation=0.95):
+def init_signals(fibers, max_rate, min_rate):
     signals = collections.OrderedDict()
-    signal = max_signal
-    for label in fibers:
-        signals[label] = signal
-        signal *= attenuation
+    attenuation = (min_rate / max_rate) ** (1 / (len(fibers) - 1))
+    for k, label in enumerate(fibers):
+        signals[label] = max_rate * attenuation ** k
     return signals
 
 
