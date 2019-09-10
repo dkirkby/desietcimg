@@ -41,7 +41,9 @@ def simulate():
     parser.add_argument('--pixmask', action='store_true',
         help='simulate pixel defects')
     parser.add_argument('--saveplot', type=str, default='simskycam.png',
-        help='filename where plot is saved')
+        help='filename where plot of first simulated exposure is saved')
+    parser.add_argument('--badplot', type=str, default=None,
+        help='prefix for saving plots of bad fits')
     parser.add_argument('--outname', type=str, default='simskycam.csv',
         help='name of CSV file where results are saved when nstudy > 1')
     parser.add_argument('--seed', type=int, default=123,
@@ -111,18 +113,20 @@ def simulate():
         if i == 0 and args.saveplot:
             A = plot_sky_camera(SCA)
             plt.savefig(args.saveplot)
+            plt.close('all')
 
         if args.nstudy > 1:
             # Save the estimated fiber fluxes.
             values = [measured[label][3] for label in labels]
             print(*values, sep=',', file=simout)
-            # Save an image if any measurements are off by more than a factor of 2.
-            ratio = np.array(values) / truth
-            if np.any((ratio > 2) | (ratio < 0.5)):
-                print(i, ratio)
-                A = plot_sky_camera(SCA)
-                plt.savefig('bad_{0}.png'.format(i))
-
+            if args.badplot is not None:
+                # Save an image if any measurements are off by more than a factor of 2.
+                ratio = np.array(values) / truth
+                if np.any((ratio > 2) | (ratio < 0.5)):
+                    print(i, ratio)
+                    A = plot_sky_camera(SCA)
+                    plt.savefig('{0}_{1}.png'.format(args.badplot, i))
+                    plt.close('all')
 
     if args.nstudy > 1:
         simout.close()

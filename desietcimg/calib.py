@@ -408,6 +408,7 @@ class CalibrationAnalysis(object):
             var.append(np.var(DY[good]) - rdnoise ** 2)
         return np.array(mu), np.array(var)
 
+    # used ncut_max_frac = 0.01-0.02 for 3x3
     def calculate_dark_stats(self, raw, pcut=1e-3, ncut_max_frac=0.01, verbose=True):
         """Identify good pixels and estimate their mean and variance.
 
@@ -473,6 +474,10 @@ class CalibrationAnalysis(object):
                     # Unable to get below pcut after masking outliers.
                     mask[iy, ix] = True
 
+        if verbose:
+            print('{0:.3f}% pixels failed pvalue > {1} cut.'
+                  .format(100 * np.count_nonzero(mask) / (ny * nx), pcut))
+
         # Mask any pixels that fall outside the expected gain curve.
         x = np.zeros((ny, nx))
         y = np.zeros((ny, nx))
@@ -482,7 +487,7 @@ class CalibrationAnalysis(object):
         yhi = x / (0.9 * self.flatinvgain) + 2 * self.rdnoise ** 2    
         mask[(y < ylo) | (y > yhi)] = True
         if verbose:
-            print('Median dark current = {0:.3f} ADU, {1:.3f}% pixels masked.'
+            print('Median dark current = {0:.3f} ADU, {1:.3f}% pixels masked after gain curve cut.'
                   .format(np.median(x[~mask]), 100 * np.count_nonzero(mask) / (ny * nx)))
         return mu, var, mask
 
