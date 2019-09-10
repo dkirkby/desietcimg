@@ -172,7 +172,7 @@ class SkyCameraAnalysis(object):
         # Removed masked pixels from  the background.
         self.bgmask[self.pixmask] = False
 
-    def get_fiber_fluxes(self, data, exptime, maxrate=1000.):
+    def get_fiber_fluxes(self, data, exptime, maxrate=1000., chisq_cut=1e8):
         """Estimate fiber fluxes and SNR values.
 
         Scans the search window for each fiber to identify the maximum
@@ -194,6 +194,10 @@ class SkyCameraAnalysis(object):
             Exposure time in seconds.
         maxrate : float
             Maximum expected rate for any fiber in elec/sec.
+        chisq_cut : float
+            Pixels whose contribution to the best-fit chisq exceed this
+            cut are masked and the fit is repeated. The purpose of this
+            is to be somewhat robust in the presence of cosmics.
 
         Returns
         -------
@@ -230,6 +234,15 @@ class SkyCameraAnalysis(object):
             mask = self.pixmask[fslice]
             # Measure the flux and background level in this fiber.
             (dxfit, dyfit, bgfit, ffit, ivar, model) = self.measure_one_fiber(stamp, stampvar, mask, fmax)
+            # Calculate per-pixel contributions to the chisquare.
+            chisq = ivar * (stamp - model) ** 2
+            bad_chisq = chisq > chisq_cut
+            if np.any(bad_chisq):
+                # Mask the pixels above the cut.
+                mask[bad_chisq] = True
+                # Refit if there are enough pixel remaining.
+                if np.count_nonzero(mask) < 0.25 * ssize ** 2:
+                    (dxfit, dyfit, bgfit, ffit, ivar, model) = self.measure_one_fiber(stamp, stampvar, mask, fmax)
             # Convert offsets in binned pixels to absolute unbinned pixel coordinates.
             xfit = x + dxfit * self.binning
             yfit = y + dyfit * self.binning
@@ -295,6 +308,7 @@ class SkyCameraAnalysis(object):
         M = self.T[jbest, ibest]
         var = stampvar + ffit * M / self.invgain
         ivar = np.divide(1, var, out=np.zeros_like(var), where=var>0)
+        ivar[mask] = 0
         # Calculate the best-fit model.
         model = bgfit + ffit * M
         return (dxfit, dyfit, bgfit, ffit, ivar, model)

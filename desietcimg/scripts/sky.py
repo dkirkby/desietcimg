@@ -123,9 +123,10 @@ def simulate():
                 # Save an image if any measurements are off by more than a factor of 2.
                 ratio = np.array(values) / truth
                 if np.any((ratio > 2) | (ratio < 0.5)):
-                    print(i, ratio)
-                    A = plot_sky_camera(SCA)
-                    plt.savefig('{0}_{1}.png'.format(args.badplot, i), what='stamp')
+                    name = '{0}_{1}.png'.format(args.badplot, i)
+                    print('Saving bad fit to {0}'.format(name))
+                    A = plot_sky_camera(SCA, what='stamp')
+                    plt.savefig(name)
                     plt.close('all')
 
     if args.nstudy > 1:
