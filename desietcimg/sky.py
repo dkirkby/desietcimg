@@ -172,7 +172,7 @@ class SkyCameraAnalysis(object):
         # Removed masked pixels from  the background.
         self.bgmask[self.pixmask] = False
 
-    def get_fiber_fluxes(self, data, exptime, maxrate=1000., chisq_cut=1e8):
+    def get_fiber_fluxes(self, data, exptime, maxrate=1000., refit=False, chisq_cut=1e8):
         """Estimate fiber fluxes and SNR values.
 
         Scans the search window for each fiber to identify the maximum
@@ -194,6 +194,9 @@ class SkyCameraAnalysis(object):
             Exposure time in seconds.
         maxrate : float
             Maximum expected rate for any fiber in elec/sec.
+        refit : bool
+            When True, refit when a stamp appears to be contaminated by
+            a cosmic ray (according to chisq_cut).
         chisq_cut : float
             Pixels whose contribution to the best-fit chisq exceed this
             cut are masked and the fit is repeated. The purpose of this
@@ -234,15 +237,16 @@ class SkyCameraAnalysis(object):
             mask = self.pixmask[fslice]
             # Measure the flux and background level in this fiber.
             (dxfit, dyfit, bgfit, ffit, ivar, model) = self.measure_one_fiber(stamp, stampvar, mask, fmax)
-            # Calculate per-pixel contributions to the chisquare.
-            chisq = ivar * (stamp - model) ** 2
-            bad_chisq = chisq > chisq_cut
-            if np.any(bad_chisq):
-                # Mask the pixels above the cut.
-                mask[bad_chisq] = True
-                # Refit if there are enough pixel remaining.
-                if np.count_nonzero(mask) < 0.25 * ssize ** 2:
-                    (dxfit, dyfit, bgfit, ffit, ivar, model) = self.measure_one_fiber(stamp, stampvar, mask, fmax)
+            if refit:
+                # Calculate per-pixel contributions to the chisquare.
+                chisq = ivar * (stamp - model) ** 2
+                bad_chisq = chisq > chisq_cut
+                if np.any(bad_chisq):
+                    # Mask the pixels above the cut.
+                    mask[bad_chisq] = True
+                    # Refit if there are enough pixel remaining.
+                    if np.count_nonzero(mask) < 0.25 * ssize ** 2:
+                        (dxfit, dyfit, bgfit, ffit, ivar, model) = self.measure_one_fiber(stamp, stampvar, mask, fmax)
             # Convert offsets in binned pixels to absolute unbinned pixel coordinates.
             xfit = x + dxfit * self.binning
             yfit = y + dyfit * self.binning
@@ -314,11 +318,19 @@ class SkyCameraAnalysis(object):
         return (dxfit, dyfit, bgfit, ffit, ivar, model)
 
 
-def init_signals(fibers, max_rate, min_rate):
+def init_signals(fibers, rate1, rate2, logsteps=False):
+    """Initialize signals that vary from rate1 to rate2.
+    """
     signals = collections.OrderedDict()
-    attenuation = (min_rate / max_rate) ** (1 / (len(fibers) - 1))
+    if logsteps:
+        drate = (rate2 / rate1) ** (1 / (len(fibers) - 1))
+    else:
+        drate = (rate2 - rate1) / (len(fibers) - 1)
     for k, label in enumerate(fibers):
-        signals[label] = max_rate * attenuation ** k
+        if logsteps:
+            signals[label] = rate1 * drate ** k
+        else:
+            signals[label] = rate1 + drate * k
     return signals
 
 
