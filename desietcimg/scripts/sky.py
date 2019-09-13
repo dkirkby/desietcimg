@@ -24,10 +24,12 @@ def simulate():
         help='number of exposures to simulate')
     parser.add_argument('--exptime', type=float, default=60,
         help='exposure time in seconds to simulate')
-    parser.add_argument('--max-rate', type=float, default=100,
-        help='max signal rate in elec/sec for the brightest fiber')
-    parser.add_argument('--ratio', type=float, default=0.1,
-        help='ratio of faintest / brightest fiber signal rate')
+    parser.add_argument('--rate1', type=float, default=100,
+        help='signal rate in elec/sec for the first fiber')
+    parser.add_argument('--rate2', type=float, default=10.,
+        help='signal rate in elec/sec for the last fiber')
+    parser.add_argument('--logsteps', action='store_true',
+        help='use log steps from rate1 to rate2 (otherwise linear)')
     parser.add_argument('--fibers', type=str, default='fibers.json',
         help='name of the JSON file with fiber locations to use')
     parser.add_argument('--calib', type=str,
@@ -81,7 +83,7 @@ def simulate():
         print(*labels, sep=',', file=simout)
 
     # Calculate the true mean signal rates (elec/sec) in each fiber.
-    true_means = init_signals(SCA.fibers, args.max_rate, args.ratio * args.max_rate)
+    true_means = init_signals(SCA.fibers, args.rate1, args.rate2, args.logsteps)
 
     # Loop over simulated exposures.
     for i in range(args.nstudy):
