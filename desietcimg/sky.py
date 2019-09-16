@@ -45,6 +45,8 @@ class SkyCameraAnalysis(object):
         self.ny = ny * binning
         self.nx = nx * binning
         self.binning = binning
+        self.rdnoise = calib.rdnoise
+        self.dark_current = calib.dark_current
         self.invgain = calib.flatinvgain
         self.pixmask = (calib.pixmask != 0)
         self.darkmu = calib.darkmu.copy()
@@ -316,6 +318,36 @@ class SkyCameraAnalysis(object):
         # Calculate the best-fit model.
         model = bgfit + ffit * M
         return (dxfit, dyfit, bgfit, ffit, ivar, model)
+
+    def predict_snr(self, rate, exptime):
+        """Predict the SNR for the fiber signal flux measurement.
+
+        The method used assumes uniform backgrounds and neglects pixelation effects,
+        so is an upper bound on the expected SNR for actual measurements.
+
+        Parameters
+        ----------
+        rate : float or array
+            Fiber integrated rate value(s) to consider in elec/sec.
+        exptime : float
+            Exposure time to use in seconds.
+
+        Returns
+        -------
+        float or array
+            Predicted SNR value(s)
+        """
+        # Calculate the expected signal in ADU.
+        g = self.invgain
+        f = rate * exptime / g
+        # Calculate the expected noise variance per pixel in ADU ** 2.
+        noise_var_per_pix = self.rdnoise ** 2 + self.dark_current * exptime / g
+        # Scale to the total noise over the fiber area in ADU ** 2.
+        noise_var = self.fiber_area * noise_var_per_pix
+        # Add the signal shot noise in ADU ** 2.
+        noise_var += f / g
+        # Return the predicted SNR.
+        return f / np.sqrt(noise_var)
 
 
 def init_signals(fibers, rate1, rate2, logsteps=False):
