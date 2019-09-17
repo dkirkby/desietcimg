@@ -30,9 +30,11 @@ class SkyCameraAnalysis(object):
         Size of centroid search region to scan in units of unbinned pixels.
     search_steps : int
         Number of search grid points to use covering the search region.
+    dark_current_model : bool
+        Use a model of dark current instead of the measured value.
     """
     def __init__(self, calib, fiberdiam_um=107., pixelsize_um=9., blur_um=5.,
-                 margin=2.0, search_pix=10, search_steps=21):
+                 margin=2.0, search_pix=10, search_steps=21, dark_current_model=True):
         ny, nx = calib.shape
         if nx == 3072:
             binning = 1
@@ -46,7 +48,16 @@ class SkyCameraAnalysis(object):
         self.nx = nx * binning
         self.binning = binning
         self.rdnoise = calib.rdnoise
-        self.dark_current = calib.dark_current
+        self.temperature = calib.dark_temperature
+        if dark_current_model:
+            if self.temperature == 5:
+                self.dark_current = 0.32 * self.binning ** 2
+            elif self.temperature == 10:
+                self.dark_current = 0.48 * self.binning ** 2
+            else:
+                raise ValueError('No model specified for T={0}C.'.format(self.temperature))
+        else:
+            self.dark_current = calib.dark_current
         self.invgain = calib.flatinvgain
         self.pixmask = (calib.pixmask != 0)
         self.darkmu = calib.darkmu.copy()
