@@ -7,6 +7,7 @@ Importing this module requires that the following packages are installed:
 """
 import collections
 import yaml
+import datetime
 import os.path
 
 import numpy as np
