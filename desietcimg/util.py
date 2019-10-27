@@ -322,11 +322,11 @@ def get_data(name, must_exist=False):
     return path
 
 
-def find_files(pattern, min=None, max=None, check_parent=True):
+def find_files(pattern, min=None, max=None, check_parent=True, partial_match_is_error=True):
     """Find files matching a pattern with a sequence number.
 
     The sequence number is represented using {N} in the input pattern,
-    which must appear exactly once in the final path element.
+    which can be repeated.
 
     Parameters
     ----------
@@ -339,6 +339,9 @@ def find_files(pattern, min=None, max=None, check_parent=True):
     check_parent : bool
         Raise an exception when True and the parent directory does
         not exist.
+    partial_match_is_error : bool
+        Raise an exception when True for any paths that match the
+        first {N} but not all subsequent {N}'s in the input pattern.
 
     Returns
     -------
@@ -348,27 +351,50 @@ def find_files(pattern, min=None, max=None, check_parent=True):
     """
     if not isinstance(pattern, pathlib.Path):
         pattern = pathlib.Path(pattern)
-    parent_path = pattern.parent
-    if check_parent and not parent_path.exists():
-        raise FileNotFoundError(parent_path)
-    file_pattern = pattern.name
-    if '{N}' not in file_pattern:
+    # Find which parts of the pattern contain {N}.
+    parts = pattern.parts
+    part_has_N = ['{N}' in part for part in parts]
+    if not any(part_has_N):
         raise ValueError('Missing sequence number {{N}} in pattern: {0}'
                          .format(file_pattern))
-    paths = sorted([str(P) for P in parent_path.glob(file_pattern.format(N='*'))])
-    if min is None and max is None:
-        return paths
-    regexp = re.compile(file_pattern.format(N='([0-9]+)') + '$')
+    first_N = part_has_N.index(True)
+    # Build the parent path to search.
+    parent_path = pathlib.Path(*parts[:first_N])
+    if check_parent and not parent_path.exists():
+        raise FileNotFoundError(parent_path)
+    # Build the suffix patttern if there is one.
+    remaining = first_N + 1
+    suffix_pattern = str(pathlib.Path(*parts[remaining:])) if remaining < len(parts) else None
+    # Look for paths matching the first {N} in the path using * as a glob pattern.
+    first_N_pattern = parts[first_N]
+    paths = sorted([str(P) for P in parent_path.glob(first_N_pattern.format(N='*'))])
+    # Check for integer matches to N.
+    regexp = re.compile(first_N_pattern.format(N='([0-9]+)') + '$')
     selected = []
+    suffix = ''
     for path in paths:
         found = regexp.search(path)
         if found:
-            seqnum = int(found.group(1))
-            if min is not None and seqnum < min:
+            N = int(found.group(1))
+            if min is not None and N< min:
                 continue
-            if max is not None and seqnum > max:
+            if max is not None and N > max:
                 continue
-            selected.append(path)
+            if suffix_pattern:
+                # Build the full path for this value of N.
+                # Use the regexp string match rather than the integer N to preserve formatting.
+                suffix = suffix_pattern.format(N=found.group(1))
+                full_path = pathlib.Path(path) / suffix
+                # Silently ignore paths that match the first {N} but not subsequent ones.
+                if not full_path.exists():
+                    if partial_match_is_error:
+                        raise ValueError(
+                            'Partial match error: found {path} but not {full_path}.'
+                            .format(path=path, full_path=full_path))
+                    else:
+                        continue
+                path = str(path)
+            selected.append(str(pathlib.Path(path) / suffix))
     return selected
 
 
