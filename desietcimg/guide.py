@@ -93,7 +93,7 @@ class GuideCameraAnalysis(object):
         self.results = None
 
     def detect_sources(self, D, W=None, meta={}, nsrc=12,
-        chisq_max=150., min_central=18, cdist_max=3., saturation=61000, verbose=False):
+        chisq_max=150., min_central=18, cdist_max=3., invgain=3.8, saturation=61000, verbose=False):
         """Detect PSF-like sources in an image.
 
         Parameters
@@ -117,6 +117,8 @@ class GuideCameraAnalysis(object):
         cdist_max : float
             Maximum distance of the image centroid from the stamp center.
             Used to reject the wings of bright stars.
+        inv_gain : float
+            Inverse gain to use to estimate variance, in elec / ADU.
         saturation : int
             Raw pixel values >= this level are considered saturated.
 
@@ -125,7 +127,7 @@ class GuideCameraAnalysis(object):
         :class:`GuideCameraResults`
             Object containing the stamps, fit results and metadata for this detection.
         """
-        D, W = desietcimg.util.prepare(D, W, saturation=saturation)
+        D, W = desietcimg.util.prepare(D, W, invgain=invgain, saturation=saturation)
         if verbose:
             print('Input image has {0} masked pixels.'.format(np.count_nonzero(W == 0)))
         meta = dict(meta)
@@ -285,7 +287,10 @@ class GuideCameraAnalysis(object):
             meta['FWHM'] = -1.
             meta['XC'] = 0.
             meta['YC'] = 0.
-            profile = np.zeros_like(self.stamps[0][0]), np.zeros_like(self.stamps[0][0])
+            nquad = len(self.offset_template)
+            nfull = 2 * nquad - 1
+            fiberfrac = np.zeros((nfull, nfull), np.float32)
+            profile = np.zeros((ss, ss), np.float32), np.zeros((ss, ss), np.float32)
             self.profile_tab['prof'] = 0.
         if verbose:
             print('  NPSF = {0} FWHM = {1:.2f}" FIBERFRAC = {2:.3f}'.format(
