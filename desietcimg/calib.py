@@ -15,9 +15,10 @@ class CalibrationAnalysis(object):
     ZERO_MASK = 0
     DARK_MASK = 1
 
-    def __init__(self, name, ny, nx):
+    def __init__(self, name, ny, nx, dtype=np.uint16):
         self.name = name
         self.shape = (ny, nx)
+        self.dtype = dtype
         self.pixmask = np.zeros(self.shape, np.uint8)
         self.fitter = desietcimg.fit.CalibFitter()
         self.dark_fitter = desietcimg.fit.DarkCurrentFitter()
@@ -30,8 +31,8 @@ class CalibrationAnalysis(object):
         self.have_flats = False
 
     def validate(self, raw):
-        if raw.dtype != np.uint16:
-            raise ValueError('Raw data must be uint16.')
+        if raw.dtype != self.dtype:
+            raise ValueError('Raw data type must be {0}.'.format(self.dtype))
         maxval = np.iinfo(raw.dtype).max
         nexp, ny, nx = raw.shape
         if (ny, nx) != self.shape:
