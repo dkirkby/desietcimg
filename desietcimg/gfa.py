@@ -1,5 +1,7 @@
 """Guide Focus Array (GFA) Utilities
 """
+import logging
+
 import numpy as np
 
 import desietcimg.util
@@ -27,6 +29,7 @@ def load_lab_data(filename='GFA_lab_data.csv'):
                 'FWELL': row['FWELL_Ke'],
                 'GAIN': row['GAIN_eADU'],
             }
+    logging.info('Loaded GFA lab data from {0}.'.format(path))
     return lab_data
 
 
@@ -90,6 +93,8 @@ class GFACamera(object):
         if raw.ndim == 2:
             raw = raw.reshape((1,) + raw_shape)
         self.nexp, ny, nx = raw.shape
+        if name not in self.gfa_names:
+            logging.warning('Not a valid GFA name: {0}.'.format(name))
         # Create views (with no data copied) for each amplifier with rows and column in readout order.
         self.amps = {
             'E': raw[:, :self.nampy, :self.nxby2], # bottom left (using convention that raw[0,0] is bottom left)
@@ -110,7 +115,8 @@ class GFACamera(object):
             ngood = np.full(self.nexp, (self.nampy - self.nrowtrim) * self.nscan)
             if np.any(bad):
                 nbad = np.count_nonzero(bad, axis=(1, 2))
-                print('Ignoring {0} bad overscan pixels for {1} {2}.'.format(nbad.sum(), self.name, amp))
+                logging.warning('Ignoring {0} bad overscan pixels for {1}-{2}.'
+                    .format(nbad.sum(), name, amp))
                 overscan = np.copy(overscan)
                 overscan[bad] = 0.
                 ngood -= nbad
