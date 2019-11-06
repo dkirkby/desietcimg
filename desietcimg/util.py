@@ -184,8 +184,8 @@ def prepare(D, W=None, invgain=1.6, smoothing=3, saturation=None, verbose=False)
         Number of pixels for median filtering of D used to estimate
         the signal variance contribution. Must be odd.
     saturation : int or None
-        Pixel values >= this level are considered saturated. Use the
-        maximum value for D.dtype when None.
+        Pixel values >= this level are considered saturated and masked.
+        Nothing is maksed when saturation is None.
 
     Returns
     -------
@@ -194,13 +194,13 @@ def prepare(D, W=None, invgain=1.6, smoothing=3, saturation=None, verbose=False)
     """
     # Default saturation level is the maximum value for this datatype.
     if saturation is None:
-        saturation = np.iinfo(D.dtype).max
-    # Find any saturated pixels.
-    saturated = (D >= saturation)
-    if verbose:
-        print('Found {np.count_nonzero(saturated)} pixels saturated (>={0}).'.format(saturation))
+        saturated = np.zeros(D.shape, bool)
+    else:
+        saturated = (D >= saturation)
+        if verbose:
+            print('Found {np.count_nonzero(saturated)} pixels saturated (>={0}).'.format(saturation))
     # Convert to a float32 array.
-    D = np.asarray(D, np.float32)
+    D = np.array(D, np.float32)
     # Select background pixels using sigma clipping.
     clipped, _, _ = scipy.stats.sigmaclip(D[~saturated])
     # Subtract the clipped mean from the data.
@@ -407,9 +407,7 @@ def load_raw(files, *keys, hdu=0, slices=None, verbose=False):
         List of filenames to read or a pattern that will be passed to
         :func:`find_files`.
     keys : variable args
-        Header keywords that are required to match between all files.
-        Any mismatch will raise a RuntimeError.  It is not considered an
-        error if a keyword is missing, as long as it is missing in all files.
+        Header keywords to read from each file.
     hdu : int or str
         Index or name of the HDU containing the raw data and header keywords.
     slices : tuple or None
@@ -423,13 +421,15 @@ def load_raw(files, *keys, hdu=0, slices=None, verbose=False):
         Tuple (raw, meta) where raw is a numpy array of shape (nexp, ny, nx)
         and the specified dtype, containing the contents of each file in the
         order they are listed in the input files, and meta is a dictionary
-        of the constant value of each specified header keyword.
+        of arrays containing the specified header values (or None when a key
+        is not present in the header).
     """
     if '{N}' in files:
         files = find_files(files)
     nexp = len(files)
     if slices is None:
         slices = (slice(None), slice(None))
+    meta = {key: [] for key in keys}
     for k, file in enumerate(files):
         with fitsio.FITS(file, mode='r') as hdus:
             if k == 0:
@@ -442,13 +442,6 @@ def load_raw(files, *keys, hdu=0, slices=None, verbose=False):
             else:
                 raw[k] = hdus[hdu][slices]
             hdr = hdus[hdu].read_header()
-            meta = {key: hdr.get(key) for key in keys}
-        if k == 0:
-            metaref = meta
-            if verbose:
-                for key in keys:
-                    print('  {0} = {1}'.format(key, meta[key]))
-        elif meta != metaref:
-            raise RuntimeError('Files have different metadata: {0}, {1}.'
-                               .format(files[0], files[k]))
-    return raw, metaref
+            for key in keys:
+                meta[key].append(hdr.get(key, None))
+    return raw, meta
