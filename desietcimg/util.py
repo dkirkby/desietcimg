@@ -3,6 +3,7 @@
 import os
 import re
 import pathlib
+import logging
 
 import numpy as np
 
@@ -14,7 +15,7 @@ import fitsio
 
 def downsample(data, downsampling, summary=np.sum, allow_trim=False):
     """Downsample a 2D array.
-    
+
     Parameters
     ----------
     data : array
@@ -32,7 +33,7 @@ def downsample(data, downsampling, summary=np.sum, allow_trim=False):
         When False, the input dimensions (ny, nx) must both exactly divide
         the downsampling value.  Otherwise, any extra rows and columns are
         silently trimmed before apply the summary function.
-        
+
     Returns
     -------
     array
@@ -104,11 +105,11 @@ def fiber_profile(x, y, r0, blur=0.1):
 
 class Convolutions(object):
     """Convolution of one or more sources with the same kernel.
-    
+
     Changes to :attr:`sources` using :meth:`set_source` will automatically
     update :attr:`convolved` be only recomputing convolutions in the
     region affected by the change.
-    
+
     The convolutions uses the `same` mode.
     """
     def __init__(self, sources, kernel):
@@ -159,16 +160,16 @@ class Convolutions(object):
         return conv_slice
 
 
-def prepare(D, W=None, invgain=1.6, smoothing=3, saturation=None, verbose=False):
+def prepare(D, W=None, invgain=1.6, smoothing=3, saturation=None):
     """Prepare image data for analysis.
-    
+
     The input data D is converted to float32, if necessary, and an
     estimate of the mean background will be subtracted.
-    
+
     If no inverse variance map W is provided, it will be estimated
     from D, including both background and signal contributions.
     Otherwise, just return W converted to float32.
-    
+
     Parameters
     ----------
     D : array
@@ -197,22 +198,20 @@ def prepare(D, W=None, invgain=1.6, smoothing=3, saturation=None, verbose=False)
         saturated = np.zeros(D.shape, bool)
     else:
         saturated = (D >= saturation)
-        if verbose:
-            print('Found {np.count_nonzero(saturated)} pixels saturated (>={0}).'.format(saturation))
+        logging.info('Found {np.count_nonzero(saturated)} pixels saturated (>={0}).'
+                     .format(saturation))
     # Convert to a float32 array.
     D = np.array(D, np.float32)
     # Select background pixels using sigma clipping.
     clipped, _, _ = scipy.stats.sigmaclip(D[~saturated])
     # Subtract the clipped mean from the data.
     bgmean = np.mean(clipped)
-    if verbose:
-        print('Subtracted background mean {0:.1f} ADU.'.format(bgmean))
+    logging.info('Subtracted background mean {0:.1f} ADU.'.format(bgmean))
     D -= bgmean
     if W is None:
         # Use the clipped pixels for the background variance estimate.
         bgvar = np.var(clipped)
-        if verbose:
-            print('Estimated background RMS {0:.1f} ADU.'.format(np.sqrt(bgvar)))
+        logging.info('Estimated background RMS {0:.1f} ADU.'.format(np.sqrt(bgvar)))
         var = bgvar * np.ones_like(D)
         # Estimate additional variance due to median-filtered signal.
         Dsmoothed = scipy.signal.medfilt2d(D, smoothing)
@@ -230,7 +229,7 @@ def prepare(D, W=None, invgain=1.6, smoothing=3, saturation=None, verbose=False)
 
 def sobelfilter(D, W):
     """Estimate the magnitude of the 2D gradient of D.
-    
+
     Uses Sobel filters in x and y modified to account for ivar weights W.
     """
     here, plus, minus = slice(1, -1), slice(2, None), slice(None, -2)
@@ -307,7 +306,7 @@ def mask_defects(D, W, chisq_max=5e3, kernel_size=3, min_neighbors=7, inplace=Fa
 
 def get_data(name, must_exist=False):
     """Return the absolute path to a named data file associated with this package.
-    
+
     Relative paths refer to the desietcimg/data/ folder of this installation.
     Use an absolute path to override this behavior.
     """
@@ -398,7 +397,7 @@ def find_files(pattern, min=None, max=None, check_parent=True, partial_match_is_
     return selected
 
 
-def load_raw(files, *keys, hdu=0, slices=None, verbose=False):
+def load_raw(files, *keys, hdu=0, slices=None):
     """ Load a sequence of raw data from FITS files into a single array.
 
     Parameters
@@ -412,8 +411,6 @@ def load_raw(files, *keys, hdu=0, slices=None, verbose=False):
         Index or name of the HDU containing the raw data and header keywords.
     slices : tuple or None
         Only load the specified tuple of slices or load the full image when None.
-    verbose : bool
-        Print information about the raw format and metadata when True.
 
     Returns
     -------
@@ -436,12 +433,14 @@ def load_raw(files, *keys, hdu=0, slices=None, verbose=False):
                 data = hdus[hdu][slices]
                 raw = np.empty((nexp,) + data.shape, data.dtype)
                 raw[0] = data
-                if verbose:
-                    print('Reading {0} files with shape {1} and dtype {2}.'
-                          .format(nexp, data.shape, data.dtype))
+                logging.info('Reading {0} files with shape {1} and dtype {2}.'
+                             .format(nexp, data.shape, data.dtype))
             else:
                 raw[k] = hdus[hdu][slices]
             hdr = hdus[hdu].read_header()
             for key in keys:
                 meta[key].append(hdr.get(key, None))
+    # Convert each list of metadata values to a numpy array.
+    for key in meta:
+        meta[key] = np.array(meta[key])
     return raw, meta
