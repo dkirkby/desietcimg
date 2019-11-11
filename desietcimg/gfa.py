@@ -4,6 +4,8 @@ import logging
 
 import numpy as np
 
+import fitsio
+
 import desietcimg.util
 
 
@@ -33,6 +35,40 @@ def load_lab_data(filename='GFA_lab_data.csv'):
     return lab_data
 
 
+def save_calib_data(name='GFA_calib.fits', comment='GFA in-situ calibration results',
+              readnoise=None, gain=None, master_zero=None, overwrite=True):
+    with fitsio.FITS(name, 'rw', clobber=overwrite) as hdus:
+        # Write a primary HDU with only the comment.
+        hdus.write(np.zeros((1,), dtype=np.float32), header=dict(COMMENT=comment))
+        # Loop over GFAs.
+        for gfanum, gfa in enumerate(desietcimg.gfa.GFACamera.gfa_names):
+            hdr = {}
+            for amp in desietcimg.gfa.GFACamera.amp_names:
+                hdr['RDNOISE_{0}'.format(amp)] = readnoise[gfa][amp]
+                hdr['GAIN_{0}'.format(amp)] = gain[gfa][amp]
+            # Write the master zero residual image.
+            hdus.write(master_zero[gfa], header=hdr, extname=gfa)
+    logging.info('Saved GFA calib data to {0}.'.format(name))
+
+
+def load_calib_data(name='GFA_calib.fits'):
+    data = {}
+    master_zero = {}
+    with fitsio.FITS(name) as hdus:
+        # Loop over GFAs.
+        for gfanum, gfa in enumerate(desietcimg.gfa.GFACamera.gfa_names):
+            hdr = hdus[gfa].read_header()
+            data[gfa] = {}
+            for amp in desietcimg.gfa.GFACamera.amp_names:
+                data[gfa][amp] = {
+                    'RDNOISE': hdr['RDNOISE_{0}'.format(amp)],
+                    'GAIN': hdr['GAIN_{0}'.format(amp)],
+                }
+            master_zero[gfa] = hdus[gfa].read().copy()
+    logging.info('Loaded GFA calib data from {0}.'.format(name))
+    return data, master_zero
+
+
 class GFACamera(object):
 
     gfa_names = [
@@ -40,8 +76,10 @@ class GFACamera(object):
         'GUIDE5', 'FOCUS6', 'GUIDE7', 'GUIDE8', 'FOCUS9']
     amp_names = ['E', 'F', 'G', 'H']
     lab_data = None
+    calib_data = None
+    master_zero = None
 
-    def __init__(self, nampy=516, nampx=1024, nscan=50, nrowtrim=4, maxdelta=50):
+    def __init__(self, nampy=516, nampx=1024, nscan=50, nrowtrim=4, maxdelta=50, calib_name='GFA_calib.fits'):
 
         self.nampy = nampy
         self.nampx = nampx
@@ -56,11 +94,13 @@ class GFACamera(object):
             'F': (slice(None), slice(None, self.nampy), slice(self.nampx, None)), # bottom left
             'G': (slice(None), slice(self.nampy, None), slice(self.nampx, None)), # top left
         }
-        # Load the class-level lab data if necessary.
-        if self.lab_data is None:
-            self.lab_data = load_lab_data()
+        # Load the class-level lab and calib data if necessary.
+        if GFACamera.lab_data is None:
+            GFACamera.lab_data = load_lab_data()
+        if GFACamera.calib_data is None:
+            GFACamera.calib_data, GFACamera.master_zero = load_calib_data(calib_name)
 
-    def setraw(self, raw, name=None):
+    def setraw(self, raw, name=None, subtract_master_zero=True, apply_gain=True):
         """Initialize using the raw GFA data provided, which can either be a single or multiple exposures.
 
         After calling this method the following attributes are set:
@@ -81,9 +121,13 @@ class GFACamera(object):
                 An array of raw data with shape (nexp, ny, nx) or (ny, nx). The raw input is not copied
                 or modified.
             name : str or None
-                Name of the GFA that produced this raw data. Must be set to one of the values in gfa_names
-                in order to lookup the correct master bias and dark images, and amplifier parameters, when
+                Name of the camera that produced this raw data. Must be set to one of the values in gfa_names
+                in order to lookup the correct master zero and dark images, and amplifier parameters, when
                 these features are used.
+            subtract_master_zero : bool
+                Subtract the master zero image for this camera after applying overscan bias correction.
+            apply_gain : bool
+                Convert from ADU to electrons using the gain specified for this camera.
         """
         if raw.ndim not in (2, 3):
             raise ValueError('raw data must be 2D or 3D.')
@@ -129,3 +173,13 @@ class GFACamera(object):
         self.data[:, :self.nampy, self.nampx:] = raw[:, :self.nampy, self.nxby2 + self.nscan:-self.nscan] - self.bias['F'].reshape(-1, 1, 1)
         self.data[:, self.nampy:, :self.nampx] = raw[:, self.nampy:, self.nscan:self.nampx + self.nscan] - self.bias['H'].reshape(-1, 1, 1)
         self.data[:, self.nampy:, self.nampx:] = raw[:, self.nampy:, self.nxby2 + self.nscan:-self.nscan] - self.bias['G'].reshape(-1, 1, 1)
+        # Subtract the master zero if requested.
+        if subtract_master_zero:
+            self.data -= GFACamera.master_zero[name]
+        # Apply the gain correction if requested.
+        if apply_gain:
+            for amp in self.amp_names:
+                self.data[self.quad[amp][1:]] *= GFACamera.calib_data[name][amp]['GAIN']
+            self.unit = 'elec'
+        else:
+            self.unit = 'ADU'
