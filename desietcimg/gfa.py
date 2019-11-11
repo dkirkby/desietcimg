@@ -36,7 +36,7 @@ def load_lab_data(filename='GFA_lab_data.csv'):
 
 
 def save_calib_data(name='GFA_calib.fits', comment='GFA in-situ calibration results',
-              readnoise=None, gain=None, master_zero=None, overwrite=True):
+              readnoise=None, gain=None, master_zero=None, mask=None, overwrite=True):
     with fitsio.FITS(name, 'rw', clobber=overwrite) as hdus:
         # Write a primary HDU with only the comment.
         hdus.write(np.zeros((1,), dtype=np.float32), header=dict(COMMENT=comment))
@@ -46,14 +46,16 @@ def save_calib_data(name='GFA_calib.fits', comment='GFA in-situ calibration resu
             for amp in desietcimg.gfa.GFACamera.amp_names:
                 hdr['RDNOISE_{0}'.format(amp)] = readnoise[gfa][amp]
                 hdr['GAIN_{0}'.format(amp)] = gain[gfa][amp]
-            # Write the master zero residual image.
-            hdus.write(master_zero[gfa], header=hdr, extname=gfa)
+            # Write the per-GFA image arrays.
+            hdus.write(master_zero[gfa], header=hdr, extname='ZERO{}'.format(gfanum))
+            hdus.write(mask[gfa].astype(np.uint8), extname='MASK{}'.format(gfanum))
     logging.info('Saved GFA calib data to {0}.'.format(name))
 
 
 def load_calib_data(name='GFA_calib.fits'):
     data = {}
     master_zero = {}
+    mask = {}
     with fitsio.FITS(name) as hdus:
         # Loop over GFAs.
         for gfanum, gfa in enumerate(desietcimg.gfa.GFACamera.gfa_names):
@@ -64,9 +66,10 @@ def load_calib_data(name='GFA_calib.fits'):
                     'RDNOISE': hdr['RDNOISE_{0}'.format(amp)],
                     'GAIN': hdr['GAIN_{0}'.format(amp)],
                 }
-            master_zero[gfa] = hdus[gfa].read().copy()
+            master_zero[gfa] = hdus['ZERO{0}'.format(gfanum)].read().copy()
+            mask[gfa] = hdus['MASK{0}'.format(gfanum)].read().astype(np.bool)
     logging.info('Loaded GFA calib data from {0}.'.format(name))
-    return data, master_zero
+    return data, master_zero, mask
 
 
 class GFACamera(object):
@@ -78,6 +81,7 @@ class GFACamera(object):
     lab_data = None
     calib_data = None
     master_zero = None
+    mask = None
 
     def __init__(self, nampy=516, nampx=1024, nscan=50, nrowtrim=4, maxdelta=50, calib_name='GFA_calib.fits'):
 
@@ -98,7 +102,7 @@ class GFACamera(object):
         if GFACamera.lab_data is None:
             GFACamera.lab_data = load_lab_data()
         if GFACamera.calib_data is None:
-            GFACamera.calib_data, GFACamera.master_zero = load_calib_data(calib_name)
+            GFACamera.calib_data, GFACamera.master_zero, GFACamera.mask = load_calib_data(calib_name)
 
     def setraw(self, raw, name=None, subtract_master_zero=True, apply_gain=True):
         """Initialize using the raw GFA data provided, which can either be a single or multiple exposures.
