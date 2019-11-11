@@ -36,7 +36,8 @@ def load_lab_data(filename='GFA_lab_data.csv'):
 
 
 def save_calib_data(name='GFA_calib.fits', comment='GFA in-situ calibration results',
-              readnoise=None, gain=None, master_zero=None, mask=None, overwrite=True):
+                    readnoise=None, gain=None, master_zero=None, mask=None, tempfit=None,
+                    overwrite=True):
     with fitsio.FITS(name, 'rw', clobber=overwrite) as hdus:
         # Write a primary HDU with only the comment.
         hdus.write(np.zeros((1,), dtype=np.float32), header=dict(COMMENT=comment))
@@ -46,6 +47,9 @@ def save_calib_data(name='GFA_calib.fits', comment='GFA in-situ calibration resu
             for amp in desietcimg.gfa.GFACamera.amp_names:
                 hdr['RDNOISE_{0}'.format(amp)] = readnoise[gfa][amp]
                 hdr['GAIN_{0}'.format(amp)] = gain[gfa][amp]
+            # Add dark current temperature fit results.
+            for k, v in tempfit[gfa].items():
+                hdr[k] = v
             # Write the per-GFA image arrays.
             hdus.write(master_zero[gfa], header=hdr, extname='ZERO{}'.format(gfanum))
             hdus.write(mask[gfa].astype(np.uint8), extname='MASK{}'.format(gfanum))
@@ -66,6 +70,8 @@ def load_calib_data(name='GFA_calib.fits'):
                     'RDNOISE': hdr['RDNOISE_{0}'.format(amp)],
                     'GAIN': hdr['GAIN_{0}'.format(amp)],
                 }
+            for key in 'TREF', 'IREF', 'TCOEF':
+                data[gfa][key] = hdr[key]
             master_zero[gfa] = hdus['ZERO{0}'.format(gfanum)].read().copy()
             mask[gfa] = hdus['MASK{0}'.format(gfanum)].read().astype(np.bool)
     logging.info('Loaded GFA calib data from {0}.'.format(name))
