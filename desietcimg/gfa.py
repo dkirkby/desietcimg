@@ -59,7 +59,7 @@ def load_calib_data(name='GFA_calib.fits'):
     with fitsio.FITS(name) as hdus:
         # Loop over GFAs.
         for gfanum, gfa in enumerate(desietcimg.gfa.GFACamera.gfa_names):
-            hdr = hdus[gfa].read_header()
+            hdr = hdus['ZERO{0}'.format(gfanum)].read_header()
             data[gfa] = {}
             for amp in desietcimg.gfa.GFACamera.amp_names:
                 data[gfa][amp] = {
