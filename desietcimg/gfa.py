@@ -36,8 +36,8 @@ def load_lab_data(filename='GFA_lab_data.csv'):
 
 
 def save_calib_data(name='GFA_calib.fits', comment='GFA in-situ calibration results',
-                    readnoise=None, gain=None, master_zero=None, mask=None, tempfit=None,
-                    overwrite=True):
+                    readnoise=None, gain=None, master_zero=None, pixel_mask=None, tempfit=None,
+                    master_dark=None, overwrite=True):
     with fitsio.FITS(name, 'rw', clobber=overwrite) as hdus:
         # Write a primary HDU with only the comment.
         hdus.write(np.zeros((1,), dtype=np.float32), header=dict(COMMENT=comment))
@@ -52,14 +52,16 @@ def save_calib_data(name='GFA_calib.fits', comment='GFA in-situ calibration resu
                 hdr[k] = v
             # Write the per-GFA image arrays.
             hdus.write(master_zero[gfa], header=hdr, extname='ZERO{}'.format(gfanum))
-            hdus.write(mask[gfa].astype(np.uint8), extname='MASK{}'.format(gfanum))
+            hdus.write(master_dark[gfa], extname='DARK{}'.format(gfanum))
+            hdus.write(pixel_mask[gfa].astype(np.uint8), extname='MASK{}'.format(gfanum))
     logging.info('Saved GFA calib data to {0}.'.format(name))
 
 
 def load_calib_data(name='GFA_calib.fits'):
     data = {}
     master_zero = {}
-    mask = {}
+    master_dark = {}
+    pixel_mask = {}
     with fitsio.FITS(name) as hdus:
         # Loop over GFAs.
         for gfanum, gfa in enumerate(desietcimg.gfa.GFACamera.gfa_names):
@@ -73,9 +75,10 @@ def load_calib_data(name='GFA_calib.fits'):
             for key in 'TREF', 'IREF', 'TCOEF':
                 data[gfa][key] = hdr[key]
             master_zero[gfa] = hdus['ZERO{0}'.format(gfanum)].read().copy()
-            mask[gfa] = hdus['MASK{0}'.format(gfanum)].read().astype(np.bool)
+            master_dark[gfa] = hdus['DARK{0}'.format(gfanum)].read().copy()
+            pixel_mask[gfa] = hdus['MASK{0}'.format(gfanum)].read().astype(np.bool)
     logging.info('Loaded GFA calib data from {0}.'.format(name))
-    return data, master_zero, mask
+    return data, master_zero, master_dark, pixel_mask
 
 
 class GFACamera(object):
@@ -87,7 +90,8 @@ class GFACamera(object):
     lab_data = None
     calib_data = None
     master_zero = None
-    mask = None
+    master_dark = None
+    pixel_mask = None
 
     def __init__(self, nampy=516, nampx=1024, nscan=50, nrowtrim=4, maxdelta=50, calib_name='GFA_calib.fits'):
 
@@ -108,7 +112,10 @@ class GFACamera(object):
         if GFACamera.lab_data is None:
             GFACamera.lab_data = load_lab_data()
         if GFACamera.calib_data is None:
-            GFACamera.calib_data, GFACamera.master_zero, GFACamera.mask = load_calib_data(calib_name)
+            (GFACamera.calib_data, GFACamera.master_zero,
+             GFACamera.master_dark, GFACamera.pixel_mask) = load_calib_data(calib_name)
+        # We have no exposures loaded yet.
+        self.nexp = 0
 
     def setraw(self, raw, name=None, subtract_master_zero=True, apply_gain=True):
         """Initialize using the raw GFA data provided, which can either be a single or multiple exposures.
@@ -122,9 +129,13 @@ class GFACamera(object):
             amps : dict of view
                 Raw array views indexed by amplifier name, including pre and post overscan regions, in row
                 and column readout order.
+            unit : str
+                Either 'elec' or 'ADU' depending on the value of apply_gain.
             data : 3D array of float32
-                Bias subtracted pixel values in ADU of shape (nexp, 2 * nampy, 2 * nampx) with
-                pre and post overscan regions removed from the raw data.
+                Bias subtracted pixel values in elec (or ADU if apply_gain is False) of shape
+                (nexp, 2 * nampy, 2 * nampx) with pre and post overscan regions removed from the raw data.
+            ivar : 3D array of float32
+                Inverse variance estimated for each exposure in units matched to the data array.
 
         Parameters:
             raw : numpy array
@@ -136,6 +147,7 @@ class GFACamera(object):
                 these features are used.
             subtract_master_zero : bool
                 Subtract the master zero image for this camera after applying overscan bias correction.
+                Note that the overscan bias correction is always applied.
             apply_gain : bool
                 Convert from ADU to electrons using the gain specified for this camera.
         """
@@ -178,6 +190,7 @@ class GFACamera(object):
         # Only allocate new memory if necessary.
         if self.data is None or len(self.data) != self.nexp:
             self.data = np.empty((self.nexp, 2 * self.nampy, 2 * self.nampx), np.float32)
+            self.ivar = np.empty((self.nexp, 2 * self.nampy, 2 * self.nampx), np.float32)
         # Assemble the bias-subtracted data with overscan removed.
         self.data[:, :self.nampy, :self.nampx] = raw[:, :self.nampy, self.nscan:self.nampx + self.nscan] - self.bias['E'].reshape(-1, 1, 1)
         self.data[:, :self.nampy, self.nampx:] = raw[:, :self.nampy, self.nxby2 + self.nscan:-self.nscan] - self.bias['F'].reshape(-1, 1, 1)
@@ -188,8 +201,19 @@ class GFACamera(object):
             self.data -= GFACamera.master_zero[name]
         # Apply the gain correction if requested.
         if apply_gain:
+            calib = GFACamera.calib_data[name]
             for amp in self.amp_names:
-                self.data[self.quad[amp][1:]] *= GFACamera.calib_data[name][amp]['GAIN']
+                self.data[self.quad[amp]] *= calib[amp]['GAIN']
+            # Use the calculated signal in elec as the estimate of Poisson variance.
+            self.ivar[:] = self.data
+            # Add the per-amplifier readnoise to the variance.
+            for amp in self.amp_names:
+                rdnoise_in_elec = calib[amp]['RDNOISE'] * calib[amp]['GAIN']
+                self.ivar[self.quad[amp]] += rdnoise_in_elec ** 2
+            # Convert var to ivar in-place, avoiding divide by zero.
+            np.divide(1, self.ivar, out=self.ivar, where=self.ivar > 0)
+            # Zero ivar for any masked pixels.
+            self.ivar[:, self.pixel_mask[name]] = 0
             self.unit = 'elec'
         else:
             self.unit = 'ADU'
