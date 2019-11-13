@@ -38,6 +38,39 @@ def load_lab_data(filename='GFA_lab_data.csv'):
 def save_calib_data(name='GFA_calib.fits', comment='GFA in-situ calibration results',
                     readnoise=None, gain=None, master_zero=None, pixel_mask=None, tempfit=None,
                     master_dark=None, overwrite=True):
+    """Any elements left blank will be copied from the current default calib data.
+    """
+    GFA = desietcimg.gfa.GFACamera()
+    if master_zero is None:
+        print('Using default master_zero')
+        master_zero = GFA.master_zero
+    if master_dark is None:
+        print('Using default master_dark')
+        master_dark = GFA.master_dark
+    if pixel_mask is None:
+        print('Using default pixel_mask')
+        pixel_mask = GFA.pixel_mask
+    _readnoise, _gain, _tempfit = {}, {}, {}
+    for gfa in GFA.gfa_names:
+        _readnoise[gfa] = {}
+        _gain[gfa] = {}
+        _tempfit[gfa] = {}
+        for amp in GFA.amp_names:
+            calib = GFA.calib_data[gfa][amp]
+            _readnoise[gfa][amp] = calib['RDNOISE']
+            _gain[gfa][amp] = calib['GAIN']
+        calib = GFA.calib_data[gfa]
+        for k in 'TREF', 'IREF', 'TCOEF':
+            _tempfit[gfa][k] = calib[k]
+    if readnoise is None:
+        print('Using default readnoise')
+        readnoise = _readnoise
+    if gain is None:
+        print('Using default gain')
+        gain = _gain
+    if tempfit is None:
+        print('Using default tempfit')
+        tempfit = _tempfit
     with fitsio.FITS(name, 'rw', clobber=overwrite) as hdus:
         # Write a primary HDU with only the comment.
         hdus.write(np.zeros((1,), dtype=np.float32), header=dict(COMMENT=comment))
@@ -54,7 +87,7 @@ def save_calib_data(name='GFA_calib.fits', comment='GFA in-situ calibration resu
             hdus.write(master_zero[gfa], header=hdr, extname='ZERO{}'.format(gfanum))
             hdus.write(master_dark[gfa], extname='DARK{}'.format(gfanum))
             hdus.write(pixel_mask[gfa].astype(np.uint8), extname='MASK{}'.format(gfanum))
-    logging.info('Saved GFA calib data to {0}.'.format(name))
+    print('Saved GFA calib data to {0}.'.format(name))
 
 
 def load_calib_data(name='GFA_calib.fits'):
