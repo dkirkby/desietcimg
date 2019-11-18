@@ -150,7 +150,7 @@ class GFACamera(object):
         # We have no exposures loaded yet.
         self.nexp = 0
 
-    def setraw(self, raw, name=None, subtract_master_zero=True, apply_gain=True):
+    def setraw(self, raw, name=None, overscan_correction=True, subtract_master_zero=True, apply_gain=True):
         """Initialize using the raw GFA data provided, which can either be a single or multiple exposures.
 
         After calling this method the following attributes are set:
@@ -224,11 +224,17 @@ class GFACamera(object):
         if self.data is None or len(self.data) != self.nexp:
             self.data = np.empty((self.nexp, 2 * self.nampy, 2 * self.nampx), np.float32)
             self.ivar = np.empty((self.nexp, 2 * self.nampy, 2 * self.nampx), np.float32)
-        # Assemble the bias-subtracted data with overscan removed.
-        self.data[:, :self.nampy, :self.nampx] = raw[:, :self.nampy, self.nscan:self.nampx + self.nscan] - self.bias['E'].reshape(-1, 1, 1)
-        self.data[:, :self.nampy, self.nampx:] = raw[:, :self.nampy, self.nxby2 + self.nscan:-self.nscan] - self.bias['F'].reshape(-1, 1, 1)
-        self.data[:, self.nampy:, :self.nampx] = raw[:, self.nampy:, self.nscan:self.nampx + self.nscan] - self.bias['H'].reshape(-1, 1, 1)
-        self.data[:, self.nampy:, self.nampx:] = raw[:, self.nampy:, self.nxby2 + self.nscan:-self.nscan] - self.bias['G'].reshape(-1, 1, 1)
+        # Assemble the real pixel data with the pre and post overscans removed.
+        self.data[:, :self.nampy, :self.nampx] = raw[:, :self.nampy, self.nscan:self.nampx + self.nscan]
+        self.data[:, :self.nampy, self.nampx:] = raw[:, :self.nampy, self.nxby2 + self.nscan:-self.nscan]
+        self.data[:, self.nampy:, :self.nampx] = raw[:, self.nampy:, self.nscan:self.nampx + self.nscan]
+        self.data[:, self.nampy:, self.nampx:] = raw[:, self.nampy:, self.nxby2 + self.nscan:-self.nscan]
+        if overscan_correction:
+            # Apply the overscan bias corrections.
+            self.data[:, :self.nampy, :self.nampx] -= self.bias['E'].reshape(-1, 1, 1)
+            self.data[:, :self.nampy, self.nampx:] -= self.bias['F'].reshape(-1, 1, 1)
+            self.data[:, self.nampy:, :self.nampx] -= self.bias['H'].reshape(-1, 1, 1)
+            self.data[:, self.nampy:, self.nampx:] -= self.bias['G'].reshape(-1, 1, 1)
         # Subtract the master zero if requested.
         if subtract_master_zero:
             self.data -= GFACamera.master_zero[name]
