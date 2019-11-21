@@ -5,6 +5,7 @@ import scipy.signal
 
 import matplotlib.pyplot as plt
 import matplotlib.patches
+import matplotlib.colors
 import matplotlib.cm
 
 import desietcimg.util
@@ -46,7 +47,7 @@ def plot_image(D, W=None, ax=None, cmap='viridis', masked_color='chocolate', thr
 
 
 class Axes(object):
-    
+
     def __init__(self, n, size=4, pad=0.02):
         rows = int(np.floor(np.sqrt(n)))
         cols = int(np.ceil(n / rows))
@@ -185,14 +186,98 @@ def plot_psf_profile(GCR, size=4, pad=0.5, inset_size=35, max_ang=2.0, label=Non
     rhs.set_xlabel('Offset from PSF center [arcsec]')
 
 
+def plot_colorhist(D, ax, imshow, mode='reverse', color='w', alpha=0.75):
+    """Draw a hybrid colorbar and histogram.
+    """
+    ax.axis('off')
+    # Extract parameters of the original imshow.
+    cmap = imshow.get_cmap()
+    vmin, vmax = imshow.get_clim()
+    # Get the pixel dimension of the axis to fill.
+    fig = plt.gcf()
+    bbox = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+    width, height = int(round(bbox.width * fig.dpi)), int(round(bbox.height * fig.dpi))
+    # Draw the colormap gradient.
+    img = np.zeros((height, width, 3))
+    xgrad = np.linspace(0, 1, width)
+    img[:] = cmap(xgrad)[:, :-1]
+    # Superimpose a histogram of pixel values.
+    counts, _ = np.histogram(D.reshape(-1), bins=np.linspace(vmin, vmax, width + 1))
+    hist_height = ((height - 1) * counts / counts.max()).astype(int)
+    mask = np.arange(height).reshape(-1, 1) < hist_height
+    if mode == 'color':
+        img[mask] = (1 - alpha) * img[mask] + alpha * np.asarray(matplotlib.colors.to_rgb(color))
+    elif mode == 'reverse':
+        cmap_r = cmap.reversed()
+        for i, x in enumerate(xgrad):
+            img[mask[:, i], i] = cmap_r(x)[:-1]
+    elif mode == 'complement':
+        # https://stackoverflow.com/questions/40233986/
+        # python-is-there-a-function-or-formula-to-find-the-complementary-colour-of-a-rgb
+        hilo = np.amin(img, axis=2, keepdims=True) + np.amax(img, axis=2, keepdims=True)
+        img[mask] = hilo[mask] - img[mask]
+    else:
+        raise ValueError('Invalid mode "{0}".'.format(mode))
+    ax.imshow(img, interpolation='none', origin='lower')
+
+
+def plot_pixels(D, label=None, colorhist=False, imshow_args={}, text_args={}, colorhist_args={}):
+    """Plot pixel data at 1:1 scale with an optional label and colorhist.
+    """
+    dpi = 100 # value only affects metadata in an output file, not appearance on screen.
+    ny, nx = D.shape
+    width, height = nx, ny
+    if colorhist:
+        colorhist_height = 32
+        height += colorhist_height
+    fig = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi, frameon=False)
+    ax = plt.axes((0, 0, 1, ny / height))
+    for name, default in dict(interpolation='none', origin='lower', cmap='plasma_r').items():
+        if name not in imshow_args:
+            imshow_args[name] = default
+    I = ax.imshow(D, **imshow_args)
+    ax.axis('off')
+    if label:
+        for name, default in dict(color='w', fontsize=18).items():
+            if name not in text_args:
+                text_args[name] = default
+        ax.text(0.01, 0.01 * nx / ny, label, transform=ax.transAxes, **text_args)
+    if colorhist:
+        axcb = plt.axes((0, ny / height, 1, colorhist_height / height))
+        plot_colorhist(D, axcb, I, **colorhist_args)
+    return fig, ax
+
+
+def plot_data(D, W, downsampling=4, label=None, colorhist=False,
+              preprocess_args={}, imshow_args={}, text_args={}, colorhist_args={}):
+    """Plot weighted image data using downsampling, optional preprocessing, and decorators.
+    """
+    D, W = desietcimg.util.downsample_weighted(D, W, downsampling)
+    D = desietcimg.util.preprocess(D, **preprocess_args)
+    if 'extent' not in imshow_args:
+        # Use the input pixel space for the extent, without downsampling.
+        ny, nx = D.shape
+        imshow_args['extent'] = [-0.5, nx * downsampling - 0.5, -0.5, ny * downsampling - 0.5]
+    return plot_pixels(D, label=label, colorhist=colorhist,
+                       imshow_args=imshow_args, text_args=text_args, colorhist_args=colorhist_args)
+
+
 def plot_full_frame(D, W=None, saturation=None, downsampling=8, clip_pct=0.5, dpi=100, GCR=None,
-                    label=None, cmap='plasma_r', fg_color='w', compress=True):
+                    label=None, cmap='plasma_r', fg_color='w', compress=True, vmin=None, vmax=None):
     # Convert to a float32 array.
     D, W = desietcimg.util.prepare(D, W, saturation=saturation)
     # Downsample.
     WD = desietcimg.util.downsample(D * W, downsampling=downsampling, summary=np.sum, allow_trim=True)
     W = desietcimg.util.downsample(W, downsampling=downsampling, summary=np.sum, allow_trim=True)
     D = np.divide(WD, W, out=np.zeros_like(WD), where=W > 0)
+    # Used clipped limits by default.
+    clip_vmin, clip_vmax = np.percentile(D.reshape(-1), (clip_pct, 100 - clip_pct))
+    # Any explicit limit overrides the clipped default.
+    vmin = vmin or clip_vmin
+    vmax = vmax or clip_vmax
+    print('clip', clip_vmin, clip_vmax, vmin, vmax)
+    if vmin >= vmax:
+        raise ValueError('Invalid limits: vmin >= vmax.')
     if compress:
         # Select background pixels using sigma clipping.
         sel = W > 0 if W is not None else (slice(None), slice(None))
@@ -201,9 +286,10 @@ def plot_full_frame(D, W=None, saturation=None, downsampling=8, clip_pct=0.5, dp
         bgmean = np.mean(clipped)
         bgrms = np.std(clipped)
         Z = np.arcsinh((D - bgmean) / bgrms)
+        vmin = np.arcsinh((vmin - bgmean) / bgrms)
+        vmax = np.arcsinh((vmax - bgmean) / bgrms)
     else:
         Z = D
-    vmin, vmax = np.percentile(Z.reshape(-1), (clip_pct, 100 - clip_pct))
     ny, nx = D.shape
     fig = plt.figure(figsize=(nx / dpi, ny / dpi), dpi=dpi, frameon=False)
     ax = plt.axes((0, 0, 1, 1))
@@ -289,7 +375,7 @@ def plot_dark_calib(CA, gain=1.5, peaklines=True, lo=None, hi=None, ax=None):
     ax = plt.gca()
     ax2 = ax.twiny()
     ax2.set_xlabel('Dark current at {0:.0f}C [e/sec/pix]'.format(CA.dark_temperature))
-    
+
     xbin = CA.darkdata['xbin']
     if lo is None:
         lo = xbin[0]
@@ -299,7 +385,7 @@ def plot_dark_calib(CA, gain=1.5, peaklines=True, lo=None, hi=None, ax=None):
     ax.plot(xbin, CA.darkdata['yexp'], 'k-', label='Single Exp.')
     ax.plot(xbin, CA.darkdata['yavg'], 'r-', label='Stack of {0}'.format(CA.dark_nexp))
     ax.plot(xbin, CA.darkdata['yfit'], 'r--', label='Model Fit')
-    
+
     if peaklines:
         # Draw lines at the best-fit peak locations.
         x0, navg, spacing, c0, c1, c2 = CA.darktheta
