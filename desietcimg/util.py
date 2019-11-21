@@ -56,6 +56,36 @@ def downsample(data, downsampling, summary=np.sum, allow_trim=False):
     return summary(blocks, axis=(2, 3))
 
 
+def downsample_weighted(D, W, downsampling=4, allow_trim=True):
+    """Downsample 2D data D with weights W.
+    """
+    if D.shape != W.shape:
+        raise ValueError('Arrays D, W must have the same shape.')
+    if D.ndim != 2:
+        raise ValueError('Arrays D, W must be 2D.')
+    WD = desietcimg.util.downsample(D * W, downsampling=downsampling, summary=np.sum, allow_trim=allow_trim)
+    W = desietcimg.util.downsample(W, downsampling=downsampling, summary=np.sum, allow_trim=allow_trim)
+    D = np.divide(WD, W, out=np.zeros_like(WD), where=W > 0)
+    return D, W
+
+
+def preprocess(D, clip_lo_pct=0.5, clip_hi_pct=99.5, vmin=None, vmax=None, compress=False):
+    """
+    """
+    if vmin is None and vmax is None:
+        vmin, vmax = np.percentile(D, (clip_lo_pct, clip_hi_pct))
+    elif vmin is None:
+        vmin = np.percentile(D, clip_lo_pct)
+    elif vmax is None:
+        vmax = np.percentile(D, clip_hi_pct)
+    if vmin >= vmax:
+        raise ValueError('Invalid limits vmin >= vmax.')
+    D = np.clip(D, vmin, vmax)
+    if compress:
+        logging.warning('The compress option is not implemented yet.')
+    return D
+
+
 def make_template(size, profile, dx=0, dy=0, oversampling=10, normalized=True):
     """Build a square template for an arbitrary profile.
 
