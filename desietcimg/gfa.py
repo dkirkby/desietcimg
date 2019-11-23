@@ -60,7 +60,7 @@ def save_calib_data(name='GFA_calib.fits', comment='GFA in-situ calibration resu
             _readnoise[gfa][amp] = calib['RDNOISE']
             _gain[gfa][amp] = calib['GAIN']
         calib = GFA.calib_data[gfa]
-        for k in 'TREF', 'IREF', 'TCOEF':
+        for k in 'TREF', 'IREF', 'TCOEF', 'I0', 'C0':
             _tempfit[gfa][k] = calib[k]
     if readnoise is None:
         print('Using default readnoise')
@@ -105,8 +105,8 @@ def load_calib_data(name='GFA_calib.fits'):
                     'RDNOISE': hdr['RDNOISE_{0}'.format(amp)],
                     'GAIN': hdr['GAIN_{0}'.format(amp)],
                 }
-            for key in 'TREF', 'IREF', 'TCOEF':
-                data[gfa][key] = hdr[key]
+            for key in 'TREF', 'IREF', 'TCOEF', 'I0', 'C0':
+                data[gfa][key] = hdr.get(key, -1)
             master_zero[gfa] = hdus['ZERO{0}'.format(gfanum)].read().copy()
             master_dark[gfa] = hdus['DARK{0}'.format(gfanum)].read().copy()
             pixel_mask[gfa] = hdus['MASK{0}'.format(gfanum)].read().astype(np.bool)
@@ -194,6 +194,7 @@ class GFACamera(object):
         self.nexp, ny, nx = raw.shape
         if name not in self.gfa_names:
             logging.warning('Not a valid GFA name: {0}.'.format(name))
+        self.name = name
         # Create views (with no data copied) for each amplifier with rows and column in readout order.
         self.amps = {
             'E': raw[:, :self.nampy, :self.nxby2], # bottom left (using convention that raw[0,0] is bottom left)
@@ -256,3 +257,77 @@ class GFACamera(object):
             self.unit = 'elec'
         else:
             self.unit = 'ADU'
+
+    def get_dark_current(self, ccdtemp=None, exptime=None, method='decorrelate', name=None, retval='image'):
+        """Calculate the predicted dark current as a scaled master dark image.
+
+        Parameters
+        ----------
+        ccdtemp : float or array or None
+            The CCD temperature to subtract in degC, normally taken from the GCCDTEMP FITS
+            header keyword.  If multiple exposures are loaded, can be an array or constant.
+            The value None is only allowed whem method is 'decorrelate'.
+        exptime : float or array or None
+            The exposure time in seconds, normally taken from the EXPTIME FITS header
+            keyword.  If multiple exposures are loaded, can be an array or constant.
+            The value None is only allowed whem method is 'decorrelate'.
+        method : 'linear' or 'exp' or 'decorrelate'
+            When 'decorrelate', determine the effective integration time at 11C by setting
+            the weighted correlation of the data with the master dark to zero.  This method
+            does not require any input temperature or exposure time but does require that
+            some raw data has already been loaded with :meth:`setraw`. Otherwise, use the
+            fitted linear or exponential (Arrhenius) model to correct for temperature at the
+            specified exposure time. These methods require that ``ccdtemp`` and ``exptime``
+            values are provided, but do not require (or use) any previously loaded raw data.
+        name : str or None
+            Assume the specified camera. When None, use the name specified for the most
+            recent call to :meth:`setraw`.
+        retval : 'image' or 'frac'
+            Returns the dark current images in electrons for each exposure as a 3D array
+            for 'image', or the corresponding fractions of the master dark image when 'frac'.
+            These fractions can be interpreted as the effective integration time in
+            seconds for the dark current at TREF (nominally 11C).
+
+        Returns
+        -------
+        array
+            3D array of predicted dark current in electrons with shape (nexp, ny, nx).
+        """
+        if method == 'decorrelate':
+            if self.nexp == 0 or self.unit != 'elec':
+                raise RuntimeError('The decorrelate method needs raw data converted to electrons.')
+        else:
+            ccdtemp = np.atleast_1d(ccdtemp)
+            exptime = np.atleast_1d(exptime)
+        # Look up the temperature model coefficients for this camera.
+        name = name or self.name
+        if name not in self.gfa_names:
+            raise RuntimeError('Cannot subtract dark current from unknown camera: "{0}".'.format(name))
+        master = self.master_dark[name]
+        calib = self.calib_data[self.name]
+        # Calculate the predicted and reference average dark currents in elec/s.
+        if method == 'linear':
+            # The IREF parameter cancels in the ratio.
+            TCOEF, TREF = calib['TCOEF'], calib['TREF']
+            ratio = 1 + TCOEF * (ccdtemp - TREF)
+            frac = exptime * ratio
+        elif method == 'exp':
+            # The I0 parameter cancels in the ratio.
+            C0, TREF = calib['C0'], calib['TREF']
+            ratio = np.exp(-C0 / (ccdtemp + 273.15)) / np.exp(-C0 / (TREF + 273.15))
+            frac = exptime * ratio
+        elif method == 'decorrelate':
+            # Calculate the fraction of the template to subtract in order to
+            # achieve zero weighted corelation with the template.
+            T = (self.ivar *  master).reshape(self.nexp, -1)
+            T /= np.sum(T ** 2, axis=1, keepdims=True)
+            WD = (self.data * self.ivar).reshape(self.nexp, -1)
+            frac = np.sum(WD * T, axis=1)
+        else:
+            raise ValueError('Invalid method "{0}".'.format(method))
+        if retval == 'image':
+            return master * frac.reshape(-1, 1, 1)
+        elif retval == 'frac':
+            return frac
+        else:
+            raise ValueError('Invalid retval "{0}".'.format(retval))
