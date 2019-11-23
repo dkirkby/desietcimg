@@ -126,14 +126,15 @@ class GFACamera(object):
     master_dark = None
     pixel_mask = None
 
-    def __init__(self, nampy=516, nampx=1024, nscan=50, nrowtrim=4, maxdelta=50, calib_name='GFA_calib.fits'):
-
+    def __init__(self, nampy=516, nampx=1024, nscan=50, nrowtrim=4, maxdelta=50,
+                 fullwell_fraction=0.8, calib_name='GFA_calib.fits'):
         self.nampy = nampy
         self.nampx = nampx
         self.nscan = nscan
         self.nxby2 = nampx + 2 * nscan
         self.nrowtrim = nrowtrim
         self.maxdelta = maxdelta
+        self.fullwell_fraction = fullwell_fraction
         self.data = None
         self.quad = {
             'E': (slice(None), slice(None, self.nampy), slice(None, self.nampx)), # bottom left
@@ -150,7 +151,8 @@ class GFACamera(object):
         # We have no exposures loaded yet.
         self.nexp = 0
 
-    def setraw(self, raw, name=None, overscan_correction=True, subtract_master_zero=True, apply_gain=True):
+    def setraw(self, raw, name=None, overscan_correction=True, subtract_master_zero=True,
+               apply_gain=True, mask_saturated=True):
         """Initialize using the raw GFA data provided, which can either be a single or multiple exposures.
 
         After calling this method the following attributes are set:
@@ -170,6 +172,9 @@ class GFACamera(object):
             ivar : 3D array of float32
                 Inverse variance estimated for each exposure in units matched to the data array.
 
+        To calculate the estimated dark current, use :meth:`get_dark_current`.  To remove the overscans
+        but not apply any calibrations, set all options to False.
+
         Parameters:
             raw : numpy array
                 An array of raw data with shape (nexp, ny, nx) or (ny, nx). The raw input is not copied
@@ -178,11 +183,17 @@ class GFACamera(object):
                 Name of the camera that produced this raw data. Must be set to one of the values in gfa_names
                 in order to lookup the correct master zero and dark images, and amplifier parameters, when
                 these features are used.
+            overscan_correction : bool
+                Subtract the per-amplifier bias estimated from each overscan region when True. Otherwise,
+                these biases are still calculated and available in `bias[amp]` but not subtracted.
             subtract_master_zero : bool
                 Subtract the master zero image for this camera after applying overscan bias correction.
                 Note that the overscan bias correction is always applied.
             apply_gain : bool
                 Convert from ADU to electrons using the gain specified for this camera.
+            mask_saturated : bool
+                Mask all pixels above ``fullwell_fraction`` of each amplifier's full-well depth as
+                saturated, i.e., with both data and ivar set to zero.
         """
         if raw.ndim not in (2, 3):
             raise ValueError('raw data must be 2D or 3D.')
@@ -254,6 +265,14 @@ class GFACamera(object):
             self.ivar = np.divide(1, self.ivar, out=self.ivar, where=self.ivar > 0)
             # Zero ivar for any masked pixels.
             self.ivar[:, self.pixel_mask[name]] = 0
+            if mask_saturated:
+                for amp in self.amp_names:
+                    cut = self.fullwell_fraction * self.lab_data[name][amp]['FWELL'] * 1000
+                    print(name, amp, cut)
+                    ok = (self.data[self.quad[amp]] < cut).astype(np.uint8)
+                    print(ok.min(), ok.max(), np.count_nonzero(ok))
+                    self.data[self.quad[amp]] *= ok
+                    self.ivar[self.quad[amp]] *= ok
             self.unit = 'elec'
         else:
             self.unit = 'ADU'
