@@ -245,13 +245,14 @@ class GFACamera(object):
             for amp in self.amp_names:
                 self.data[self.quad[amp]] *= calib[amp]['GAIN']
             # Use the calculated signal in elec as the estimate of Poisson variance.
-            self.ivar[:] = self.data
+            self.ivar = np.maximum(self.data, 0, out=self.ivar)
             # Add the per-amplifier readnoise to the variance.
             for amp in self.amp_names:
                 rdnoise_in_elec = calib[amp]['RDNOISE'] * calib[amp]['GAIN']
+                print(name, amp, rdnoise_in_elec)
                 self.ivar[self.quad[amp]] += rdnoise_in_elec ** 2
             # Convert var to ivar in-place, avoiding divide by zero.
-            np.divide(1, self.ivar, out=self.ivar, where=self.ivar > 0)
+            self.ivar = np.divide(1, self.ivar, out=self.ivar, where=self.ivar > 0)
             # Zero ivar for any masked pixels.
             self.ivar[:, self.pixel_mask[name]] = 0
             self.unit = 'elec'
