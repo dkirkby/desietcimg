@@ -268,9 +268,7 @@ class GFACamera(object):
             if mask_saturated:
                 for amp in self.amp_names:
                     cut = self.fullwell_fraction * self.lab_data[name][amp]['FWELL'] * 1000
-                    print(name, amp, cut)
                     ok = (self.data[self.quad[amp]] < cut).astype(np.uint8)
-                    print(ok.min(), ok.max(), np.count_nonzero(ok))
                     self.data[self.quad[amp]] *= ok
                     self.ivar[self.quad[amp]] *= ok
             self.unit = 'elec'
