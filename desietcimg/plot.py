@@ -233,21 +233,23 @@ def plot_pixels(D, label=None, colorhist=False, zoom=1, masked_color='cyan',
         height += colorhist_height
     fig = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi, frameon=False)
     ax = plt.axes((0, 0, 1, zoom * ny / height))
+    args = dict(imshow_args)
     for name, default in dict(interpolation='none', origin='lower', cmap='plasma_r').items():
-        if name not in imshow_args:
-            imshow_args[name] = default
+        if name not in args:
+            args[name] = default
     # Set the masked color in the specified colormap.
-    cmap = matplotlib.cm.get_cmap(imshow_args['cmap'])
+    cmap = matplotlib.cm.get_cmap(args['cmap'])
     cmap.set_bad(color=masked_color)
-    imshow_args['cmap'] = cmap
+    args['cmap'] = cmap
     # Draw the image.
-    I = ax.imshow(D, **imshow_args)
+    I = ax.imshow(D, **args)
     ax.axis('off')
     if label:
+        args = dict(text_args)
         for name, default in dict(color='w', fontsize=18).items():
-            if name not in text_args:
-                text_args[name] = default
-        ax.text(0.01, 0.01 * nx / ny, label, transform=ax.transAxes, **text_args)
+            if name not in args:
+                args[name] = default
+        ax.text(0.01, 0.01 * nx / ny, label, transform=ax.transAxes, **args)
     if colorhist:
         axcb = plt.axes((0, zoom * ny / height, 1, colorhist_height / height))
         plot_colorhist(D, axcb, I, **colorhist_args)
@@ -262,12 +264,14 @@ def plot_data(D, W, downsampling=4, zoom=1, label=None, colorhist=False,
     D, W = desietcimg.util.downsample_weighted(D, W, downsampling)
     # Preprocess the data for display.
     D = desietcimg.util.preprocess(D, W, **preprocess_args)
-    if 'extent' not in imshow_args:
+    # Display the image.
+    args = dict(imshow_args)
+    if 'extent' not in args:
         # Use the input pixel space for the extent, without downsampling.
         ny, nx = D.shape
-        imshow_args['extent'] = [-0.5, nx * downsampling - 0.5, -0.5, ny * downsampling - 0.5]
+        args['extent'] = [-0.5, nx * downsampling - 0.5, -0.5, ny * downsampling - 0.5]
     return plot_pixels(D, zoom=zoom, label=label, colorhist=colorhist,
-                       imshow_args=imshow_args, text_args=text_args, colorhist_args=colorhist_args)
+                       imshow_args=args, text_args=text_args, colorhist_args=colorhist_args)
 
 
 def plot_full_frame(D, W=None, saturation=None, downsampling=8, clip_pct=0.5, dpi=100, GCR=None,
