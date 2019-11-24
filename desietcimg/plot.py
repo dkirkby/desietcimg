@@ -203,7 +203,7 @@ def plot_colorhist(D, ax, imshow, mode='reverse', color='w', alpha=0.75):
     img[:] = cmap(xgrad)[:, :-1]
     # Superimpose a histogram of pixel values.
     counts, _ = np.histogram(D.reshape(-1), bins=np.linspace(vmin, vmax, width + 1))
-    hist_height = ((height - 1) * counts / counts.max()).astype(int)
+    hist_height = ((height - 1) * counts / counts[1:-1].max()).astype(int)
     mask = np.arange(height).reshape(-1, 1) < hist_height
     if mode == 'color':
         img[mask] = (1 - alpha) * img[mask] + alpha * np.asarray(matplotlib.colors.to_rgb(color))
@@ -221,20 +221,26 @@ def plot_colorhist(D, ax, imshow, mode='reverse', color='w', alpha=0.75):
     ax.imshow(img, interpolation='none', origin='lower')
 
 
-def plot_pixels(D, label=None, colorhist=False, imshow_args={}, text_args={}, colorhist_args={}):
+def plot_pixels(D, label=None, colorhist=False, zoom=1, masked_color='cyan',
+                imshow_args={}, text_args={}, colorhist_args={}):
     """Plot pixel data at 1:1 scale with an optional label and colorhist.
     """
     dpi = 100 # value only affects metadata in an output file, not appearance on screen.
     ny, nx = D.shape
-    width, height = nx, ny
+    width, height = zoom * nx, zoom * ny
     if colorhist:
         colorhist_height = 32
         height += colorhist_height
     fig = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi, frameon=False)
-    ax = plt.axes((0, 0, 1, ny / height))
+    ax = plt.axes((0, 0, 1, zoom * ny / height))
     for name, default in dict(interpolation='none', origin='lower', cmap='plasma_r').items():
         if name not in imshow_args:
             imshow_args[name] = default
+    # Set the masked color in the specified colormap.
+    cmap = matplotlib.cm.get_cmap(imshow_args['cmap'])
+    cmap.set_bad(color=masked_color)
+    imshow_args['cmap'] = cmap
+    # Draw the image.
     I = ax.imshow(D, **imshow_args)
     ax.axis('off')
     if label:
@@ -243,22 +249,24 @@ def plot_pixels(D, label=None, colorhist=False, imshow_args={}, text_args={}, co
                 text_args[name] = default
         ax.text(0.01, 0.01 * nx / ny, label, transform=ax.transAxes, **text_args)
     if colorhist:
-        axcb = plt.axes((0, ny / height, 1, colorhist_height / height))
+        axcb = plt.axes((0, zoom * ny / height, 1, colorhist_height / height))
         plot_colorhist(D, axcb, I, **colorhist_args)
     return fig, ax
 
 
-def plot_data(D, W, downsampling=4, label=None, colorhist=False,
+def plot_data(D, W, downsampling=4, zoom=1, label=None, colorhist=False,
               preprocess_args={}, imshow_args={}, text_args={}, colorhist_args={}):
     """Plot weighted image data using downsampling, optional preprocessing, and decorators.
     """
+    # Downsample the input data.
     D, W = desietcimg.util.downsample_weighted(D, W, downsampling)
-    D = desietcimg.util.preprocess(D, **preprocess_args)
+    # Preprocess the data for display.
+    D = desietcimg.util.preprocess(D, W, **preprocess_args)
     if 'extent' not in imshow_args:
         # Use the input pixel space for the extent, without downsampling.
         ny, nx = D.shape
         imshow_args['extent'] = [-0.5, nx * downsampling - 0.5, -0.5, ny * downsampling - 0.5]
-    return plot_pixels(D, label=label, colorhist=colorhist,
+    return plot_pixels(D, zoom=zoom, label=label, colorhist=colorhist,
                        imshow_args=imshow_args, text_args=text_args, colorhist_args=colorhist_args)
 
 

@@ -127,7 +127,7 @@ class GFACamera(object):
     pixel_mask = None
 
     def __init__(self, nampy=516, nampx=1024, nscan=50, nrowtrim=4, maxdelta=50,
-                 fullwell_fraction=0.8, calib_name='GFA_calib.fits'):
+                 fullwell_fraction=0.5, calib_name='GFA_calib.fits'):
         self.nampy = nampy
         self.nampx = nampx
         self.nscan = nscan
