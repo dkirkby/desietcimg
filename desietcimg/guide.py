@@ -117,7 +117,7 @@ class GuideCameraAnalysis(object):
         cdist_max : float
             Maximum distance of the image centroid from the stamp center.
             Used to reject the wings of bright stars.
-        inv_gain : float
+        invgain : float
             Inverse gain to use to estimate variance, in elec / ADU.
         saturation : int
             Raw pixel values >= this level are considered saturated.
@@ -127,7 +127,7 @@ class GuideCameraAnalysis(object):
         :class:`GuideCameraResults`
             Object containing the stamps, fit results and metadata for this detection.
         """
-        D, W = desietcimg.util.prepare(D, W, invgain=invgain, saturation=saturation)
+        ##D, W = desietcimg.util.prepare(D, W, invgain=invgain, saturation=saturation)
         if verbose:
             print('Input image has {0} masked pixels.'.format(np.count_nonzero(W == 0)))
         meta = dict(meta)
@@ -161,7 +161,7 @@ class GuideCameraAnalysis(object):
             # Find the largest filtered value in the inset region and its indices [iy, ix].
             iy, ix = np.unravel_index(np.argmax(inset), (ny - 2 * h, nx - 2 * h))
             fmax = inset[iy, ix]
-            
+
             # Extract the stamp centered on [iy, ix] in the full (non-inset) image.
             xlo, ylo = ix, iy
             xhi, yhi = ix + ss, iy + ss
@@ -174,7 +174,7 @@ class GuideCameraAnalysis(object):
             n100 = np.count_nonzero(Dgrad > 100)
             n10 = np.count_nonzero(Dgrad > 10)
             '''
-            
+
             # Find the largest filtered value outside of this stamp.
             save = filtered[ylo:yhi, xlo:xhi].copy()
             filtered[ylo:yhi, xlo:xhi] = fmin
@@ -190,7 +190,7 @@ class GuideCameraAnalysis(object):
                 stamp, ivar, chisq_max=chisq_max, min_neighbors=5, inplace=True)
             if verbose:
                 print('  Masked {0} pixels within stamp.'.format(nmasked))
-            
+
             # Update the WD and W convolutions with the new ivar.
             CWD.set_source(slice(ylo, yhi), slice(xlo, xhi), stamp * ivar)
             changed = CW.set_source(slice(ylo, yhi), slice(xlo, xhi), ivar)
@@ -246,7 +246,7 @@ class GuideCameraAnalysis(object):
             M0 = np.sum(clipped * ivar)
             Mx = np.sum(self.xgrid * clipped * ivar) / M0
             My = np.sum(self.ygrid * clipped * ivar) / M0
-            
+
             # Calculate the centroid distance from the stamp center.
             cdist = np.sqrt(Mx ** 2 + My ** 2)
 
@@ -265,7 +265,7 @@ class GuideCameraAnalysis(object):
                 result = self.fitter2.fit(stamp, ivar)
                 if verbose:
                     print('  2nd Fit: {0}'.format(result['message']))
-    
+
             # Save this candidate PSF-like source.
             stamps.append((stamp, ivar))
             results.append((result, slice(ylo, yhi), slice(xlo, xhi)))
