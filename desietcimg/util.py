@@ -390,8 +390,8 @@ def find_files(pattern, min=None, max=None, check_parent=True, partial_match_is_
     parts = pattern.parts
     part_has_N = ['{N}' in part for part in parts]
     if not any(part_has_N):
-        raise ValueError('Missing sequence number {{N}} in pattern: {0}'
-                         .format(file_pattern))
+        # Nothing to match. Return the input if it exists.
+        return [str(pattern)] if pattern.exists() else []
     first_N = part_has_N.index(True)
     # Build the parent path to search.
     parent_path = pathlib.Path(*parts[:first_N])
@@ -411,7 +411,7 @@ def find_files(pattern, min=None, max=None, check_parent=True, partial_match_is_
         found = regexp.search(path)
         if found:
             N = int(found.group(1))
-            if min is not None and N< min:
+            if min is not None and N < min:
                 continue
             if max is not None and N > max:
                 continue
@@ -457,7 +457,7 @@ def load_raw(files, *keys, hdu=0, slices=None):
         of arrays containing the specified header values (or None when a key
         is not present in the header).
     """
-    if '{N}' in files:
+    if '{N}' in str(files):
         files = find_files(files)
     nexp = len(files)
     if slices is None:
