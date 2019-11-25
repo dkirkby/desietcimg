@@ -95,7 +95,7 @@ def load_calib_data(name='GFA_calib.fits'):
     master_zero = {}
     master_dark = {}
     pixel_mask = {}
-    with fitsio.FITS(name) as hdus:
+    with fitsio.FITS(str(name)) as hdus:
         # Loop over GFAs.
         for gfanum, gfa in enumerate(desietcimg.gfa.GFACamera.gfa_names):
             hdr = hdus['ZERO{0}'.format(gfanum)].read_header()
@@ -275,7 +275,7 @@ class GFACamera(object):
         else:
             self.unit = 'ADU'
 
-    def get_dark_current(self, ccdtemp=None, exptime=None, method='decorrelate', name=None, retval='image'):
+    def get_dark_current(self, ccdtemp=None, exptime=None, method='linear', name=None, retval='image'):
         """Calculate the predicted dark current as a scaled master dark image.
 
         Parameters

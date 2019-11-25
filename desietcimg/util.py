@@ -71,7 +71,7 @@ def downsample_weighted(D, W, downsampling=4, allow_trim=True):
     return D, W
 
 
-def preprocess(D, W, nsig_lo=8, nsig_hi=24, vmin=None, vmax=None):
+def preprocess(D, W, nsig_lo=10, nsig_hi=30, vmin=None, vmax=None):
     """Preprocess weighted 2D array data.
     """
     masked = W == 0
@@ -460,6 +460,9 @@ def load_raw(files, *keys, hdu=0, slices=None):
     if isinstance(files, (str, pathlib.Path)):
         files = find_files(files)
     nexp = len(files)
+    if nexp == 0:
+        logging.warning('No files specified.')
+        return None, None
     if slices is None:
         slices = (slice(None), slice(None))
     meta = {key: [] for key in keys}
