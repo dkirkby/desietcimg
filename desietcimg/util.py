@@ -457,7 +457,7 @@ def load_raw(files, *keys, hdu=0, slices=None):
         of arrays containing the specified header values (or None when a key
         is not present in the header).
     """
-    if '{N}' in str(files):
+    if isinstance(files, (str, pathlib.Path)):
         files = find_files(files)
     nexp = len(files)
     if slices is None:
