@@ -198,15 +198,15 @@ def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, maxsrc=20, measure=None
     sources = []
     snrsq = snr ** 2
     for idx in range(nlabels):
-        label = labels[ranks[idx + 1]]
+        label = labels[ranks[idx]]
         # Lookup this source's bounding box.
         yslice, xslice = bboxes[label - 1]
         size = max(yslice.stop - yslice.start, xslice.stop - xslice.start)
         if size < minsize or size > maxsize:
             continue
         # Calculate the SNR**2 weighted center of mass for this source.
-        yc, xc = scipy.ndimage.center_of_mass(snrsq, labeled, label)
-        params = (snrtot[label - 1], xc, yc)
+        #yc, xc = scipy.ndimage.center_of_mass(snrsq, labeled, label)
+        params = (snrtot[label - 1], yslice, xslice)
         if measure is not None:
             params = measure(*params)
             if params is None:
