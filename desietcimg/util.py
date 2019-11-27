@@ -142,23 +142,30 @@ def get_significance(D, W, smoothing=2.5, downsampling=2, medfiltsize=5):
     return D * np.sqrt(W)
 
 
-def detect_sources(SNR, SNRmin=4, maxsrc=20, measure=None):
+def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, maxsrc=20, measure=None):
     """Detect and measure sources in a significance image.
 
     A source is defined as a connected and isolated region of pixels above
-    some threshold.  When ``measure`` is None, the ``maxsrc`` sources with
-    the highest total SNR are returned with their total SNR and centroid
+    some threshold that fits within a square bounding box with a size in
+    the range ``minsize`` to ``maxsize`` pixels.
+
+    When ``measure`` is None, the ``maxsrc`` sources with the
+    highest total SNR are returned with their total SNR and centroid
     coordinates measured.  When a callable ``measure`` is supplied, it
     is passed the total SNR and centroid coordinates and can either return
     None to reject a source, or return an updated set of measurements.
 
     Parameters
     ----------
-    SNR : array
+    snr : array
         2D image of pixel significances, e.g., from :func:`get_significance`.
-    SNRmin : float
+    minsnr : float
         All pixels above this threshold will be assigned to a potential
         source.
+    minsize : int
+        Minimum square bounding box size for a source.
+    maxsize : int
+        Maximum square bounding box size for a source.
     maxsrc : int
         Maximum number of measured sources to return.
     measure : callable or None
@@ -171,23 +178,35 @@ def detect_sources(SNR, SNRmin=4, maxsrc=20, measure=None):
     list
         A list of the measurements for each detected source.
     """
-    ny, nx = SNR.shape
+    if minsize > maxsize:
+        raise ValueError('Expected minsize <= maxsize.')
+    ny, nx = snr.shape
     # Label all non-overlapping regions above SNRmin in the inset image.
-    labeled, nlabels = scipy.ndimage.label(SNR > SNRmin)
+    labeled, nlabels = scipy.ndimage.label(snr > minsnr)
+    if nlabels == 0:
+        return []
     labels = np.arange(1, nlabels + 1)
-    # Estimate the quadrature summed SNR for each labeled region.
-    SNRtot = scipy.ndimage.labeled_comprehension(
-        SNR, labeled, labels, out_dtype=float, default=-1,
+    # Calculate bounding boxes for each candidate source.
+    bboxes = scipy.ndimage.find_objects(labeled)
+    # Estimate the quadrature summed SNR for each candidate source.
+    snrtot = scipy.ndimage.labeled_comprehension(
+        snr, labeled, labels, out_dtype=float, default=-1,
         func=lambda X: np.sqrt(np.sum(X ** 2)))
-    # Rank sources by SNRtot.
-    ranks = np.argsort(SNRtot)[::-1]
+    # Rank sources by snrtot.
+    ranks = np.argsort(snrtot)[::-1]
     # Build the final list of detected sources.
     sources = []
+    snrsq = snr ** 2
     for idx in range(nlabels):
         label = labels[ranks[idx + 1]]
+        # Lookup this source's bounding box.
+        yslice, xslice = bboxes[label - 1]
+        size = max(yslice.stop - yslice.start, xslice.stop - xslice.start)
+        if size < minsize or size > maxsize:
+            continue
         # Calculate the SNR**2 weighted center of mass for this source.
-        yc, xc = scipy.ndimage.center_of_mass(SNR ** 2, labeled, label)
-        params = (SNRtot[idx], xc, yc)
+        yc, xc = scipy.ndimage.center_of_mass(snrsq, labeled, label)
+        params = (snrtot[label - 1], xc, yc)
         if measure is not None:
             params = measure(*params)
             if params is None:
