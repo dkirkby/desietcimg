@@ -9,6 +9,7 @@ import numpy as np
 
 import scipy.signal
 import scipy.stats
+import scipy.ndimage
 
 import fitsio
 
@@ -72,7 +73,7 @@ def downsample_weighted(D, W, downsampling=4, allow_trim=True):
 
 
 def preprocess(D, W, nsig_lo=10, nsig_hi=30, vmin=None, vmax=None):
-    """Preprocess weighted 2D array data.
+    """Preprocess weighted 2D array data for display.
     """
     masked = W == 0
     # Calculate the median unmasked pixel value.
@@ -90,6 +91,111 @@ def preprocess(D, W, nsig_lo=10, nsig_hi=30, vmin=None, vmax=None):
     # Set masked pixel values to nan so they are not plotted.
     D[masked] = np.nan
     return D
+
+
+def get_significance(D, W, smoothing=2.5, downsampling=2, medfiltsize=5):
+    """Calculate a downsampled pixel significance image.
+
+    This function is a quick and robust way to calculate a significance
+    image suitable for thresholding to identify regions likely to contain
+    a source.  There are three stages:
+
+      - Apply a weighted Gaussian filter,
+      - Perform a weighted downsampling,
+      - Estimate and subtract a background image using a median filter.
+
+    This is designed to work with :func:`detect_sources`.
+
+    Parameters
+    ----------
+    D : array
+        2D array of pixel values.
+    W : array
+        2D array of corresponding ivar weights with same shape as D.
+    smoothing : float
+        Gaussian smoothing sigma to apply in pixels before downsampling.
+    downsampling : int
+        Downsampling factor to apply. Must evenly divide both dimensions of D.
+    medfiltsize : int
+        Size of median filter to apply after after downsampling to estimate
+        the smoothly varying background. Must be odd.
+
+    Returns
+    -------
+    array
+        2D array of downsampled pixel significance values. Note that the
+        returned dimensions are downsampled relative to the input arrays.
+    """
+    # Apply weighted smoothing.
+    WD = scipy.ndimage.gaussian_filter(W * D, smoothing)
+    W = scipy.ndimage.gaussian_filter(W, smoothing)
+    D = np.divide(WD, W, out=np.zeros_like(D), where=W > 0)
+    # Downsample.
+    D, W = downsample_weighted(D, W, downsampling=downsampling, allow_trim=False)
+    # Median filter the data to estimate background variations.
+    mask = W == 0
+    D[mask] = np.median(D[~mask])
+    Dm = scipy.ndimage.median_filter(D, medfiltsize)
+    # Subtract the median-filtered image.
+    D -= Dm
+    # Estimate the significance of each (downsampled) pixel.
+    return D * np.sqrt(W)
+
+
+def detect_sources(SNR, SNRmin=4, maxsrc=20, measure=None):
+    """Detect and measure sources in a significance image.
+
+    A source is defined as a connected and isolated region of pixels above
+    some threshold.  When ``measure`` is None, the ``maxsrc`` sources with
+    the highest total SNR are returned with their total SNR and centroid
+    coordinates measured.  When a callable ``measure`` is supplied, it
+    is passed the total SNR and centroid coordinates and can either return
+    None to reject a source, or return an updated set of measurements.
+
+    Parameters
+    ----------
+    SNR : array
+        2D image of pixel significances, e.g., from :func:`get_significance`.
+    SNRmin : float
+        All pixels above this threshold will be assigned to a potential
+        source.
+    maxsrc : int
+        Maximum number of measured sources to return.
+    measure : callable or None
+        Optional function that is passed the total SNR and centroid coordinates
+        of a candidate source and either returns None to reject the source or
+        an updated set of measurements.
+
+    Returns
+    -------
+    list
+        A list of the measurements for each detected source.
+    """
+    ny, nx = SNR.shape
+    # Label all non-overlapping regions above SNRmin in the inset image.
+    labeled, nlabels = scipy.ndimage.label(SNR > SNRmin)
+    labels = np.arange(1, nlabels + 1)
+    # Estimate the quadrature summed SNR for each labeled region.
+    SNRtot = scipy.ndimage.labeled_comprehension(
+        SNR, labeled, labels, out_dtype=float, default=-1,
+        func=lambda X: np.sqrt(np.sum(X ** 2)))
+    # Rank sources by SNRtot.
+    ranks = np.argsort(SNRtot)[::-1]
+    # Build the final list of detected sources.
+    sources = []
+    for idx in range(nlabels):
+        label = labels[ranks[idx + 1]]
+        # Calculate the SNR**2 weighted center of mass for this source.
+        yc, xc = scipy.ndimage.center_of_mass(SNR ** 2, labeled, label)
+        params = (SNRtot[idx], xc, yc)
+        if measure is not None:
+            params = measure(*params)
+            if params is None:
+                continue
+        sources.append(params)
+        if len(sources) == maxsrc:
+            break
+    return sources
 
 
 def make_template(size, profile, dx=0, dy=0, oversampling=10, normalized=True):
