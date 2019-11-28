@@ -445,6 +445,8 @@ def get_median_stack(stamps, maxdither=3, maxdist=5):
     """
     ny, nx = stamps[0][0].shape
     nstamp = len(stamps)
+    if nstamp == 0:
+        return []
     distances = np.zeros((nstamp, nstamp))
     dithers = np.zeros((nstamp, nstamp, 2), int)
     for i in range(nstamp - 1):

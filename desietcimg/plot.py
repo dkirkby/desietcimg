@@ -418,3 +418,19 @@ def plot_dark_calib(CA, gain=1.5, peaklines=True, lo=None, hi=None, ax=None):
     ax.set_yticks([])
     ax.set_xlabel('Bias subtracted pixel value [ADU]')
     ax.legend(title='{0} @ {1:.0f}s'.format(CA.name, CA.dark_exptime))
+
+
+def plot_stack(stack, cmap='plasma_r', masked_color='cyan'):
+    nstack = len(stack)
+    cmap = matplotlib.cm.get_cmap(cmap)
+    cmap.set_bad(color=masked_color)
+    A = desietcimg.plot.Axes(nstack, size=2, pad=0.01)
+    for ax, (dist, D, W) in zip(A.axes[:nstack], stack):
+        mu = np.sum(D * W) / np.sum(W)
+        ivar = np.median(W[W > 0])
+        z = np.arcsinh((D - mu) * (0.02 * np.sqrt(ivar)))
+        vmin, vmax = np.percentile(z[W > 0], (1, 99))
+        z[W == 0] = np.nan
+        ax.imshow(z, interpolation='none', origin='lower', vmin=vmin, vmax=vmax, cmap=cmap)
+        ax.text(0.5, 0, f'{dist:.5f}', transform=ax.transAxes, fontsize=12, color='k',
+                verticalalignment='bottom', horizontalalignment='center')
