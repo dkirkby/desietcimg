@@ -142,7 +142,7 @@ def get_significance(D, W, smoothing=2.5, downsampling=2, medfiltsize=5):
     return D * np.sqrt(W)
 
 
-def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, maxsrc=20, measure=None):
+def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, minsep=0, maxsrc=20, measure=None):
     """Detect and measure sources in a significance image.
 
     A source is defined as a connected and isolated region of pixels above
@@ -166,6 +166,10 @@ def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, maxsrc=20, measure=None
         Minimum square bounding box size for a source.
     maxsize : int
         Maximum square bounding box size for a source.
+    minsep : float
+        Minimum distance between any pair of detected sources in pixels.
+        Distances are measured between the SNR ** 2 weighted centers of
+        gravity of each source candidate.
     maxsrc : int
         Maximum number of measured sources to return.
     measure : callable or None
@@ -197,6 +201,8 @@ def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, maxsrc=20, measure=None
     # Build the final list of detected sources.
     sources = []
     snrsq = snr ** 2
+    minsepsq = minsep ** 2
+    centroids = np.empty((maxsrc, 2))
     for idx in range(nlabels):
         label = labels[ranks[idx]]
         # Lookup this source's bounding box.
@@ -205,12 +211,19 @@ def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, maxsrc=20, measure=None
         if size < minsize or size > maxsize:
             continue
         # Calculate the SNR**2 weighted center of mass for this source.
-        #yc, xc = scipy.ndimage.center_of_mass(snrsq, labeled, label)
-        params = (snrtot[label - 1], yslice, xslice)
+        yc, xc = scipy.ndimage.center_of_mass(snrsq, labeled, label)
+        nsrc = len(sources)
+        if nsrc > 0 and minsep > 0:
+            # Calculate the distance to each previous source.
+            rsq = np.sum((centroids[:nsrc] - np.array([xc, yc])) ** 2, axis=1)
+            if np.any(rsq < minsepsq):
+                continue
+        params = (snrtot[label - 1], xc, yc, yslice, xslice)
         if measure is not None:
             params = measure(*params)
             if params is None:
                 continue
+        centroids[nsrc] = (xc, yc)
         sources.append(params)
         if len(sources) == maxsrc:
             break
