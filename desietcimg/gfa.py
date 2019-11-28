@@ -337,3 +337,92 @@ class GFACamera(object):
             return frac
         else:
             raise ValueError('Invalid retval "{0}".'.format(retval))
+
+    def get_psfs(self, iexp=0, downsampling=2, margin=16):
+        """Find PSF candidates in a specified exposure.
+
+        For best results, estimate and subtract the dark current before calling this method.
+        """
+        ny, nx = 2 * self.nampy, 2 * self.nampx
+        SNR = desietcimg.util.get_significance(
+            self.data[iexp], self.ivar[iexp], downsampling=downsampling)
+        M = GFASourceMeasure(
+            self.data[iexp], self.ivar[iexp], margin, ny - margin, margin, nx - margin,
+            stampsize=45, downsampling=downsampling)
+        self.psfs = desietcimg.util.detect_sources(SNR, measure=M, minsnr=2.5, maxsrc=30)
+        return len(self.psfs)
+
+    def get_donuts(self, iexp=0, downsampling=2, margin=16):
+        ny, nx = 2 * self.nampy, 2 * self.nampx
+        SNR = desietcimg.util.get_significance(
+            self.data[iexp], self.ivar[iexp], downsampling=downsampling)
+        ML = GFASourceMeasure(
+            self.data[iexp], self.ivar[iexp], margin, ny - margin, margin, 900,
+            stampsize=65, downsampling=downsampling)
+        MR = GFASourceMeasure(
+            self.data[iexp], self.ivar[iexp], margin, ny - margin, nx - 900, nx - margin,
+            stampsize=65, downsampling=downsampling)
+        args = dict(minsnr=2.5, minsep=45 / downsampling, maxsrc=15)
+        self.donuts = (
+            desietcimg.util.detect_sources(SNR, measure=ML, **args),
+            desietcimg.util.detect_sources(SNR, measure=MR, **args))
+        return len(self.donuts[0]), len(self.donuts[1])
+
+
+class GFASourceMeasure(object):
+    """Measure candidate sources in D[y1:y2, x1:x2]
+    """
+    def __init__(self, D, W, y1=0, y2=None, x1=0, x2=None, stampsize=45,
+                 downsampling=2, maxsaturated=3, saturation=1e5):
+        assert stampsize % 2 == 1
+        self.rsize = stampsize // 2
+        self.downsampling = downsampling
+        self.D = D
+        self.W = W
+        self.maxsaturated = maxsaturated
+        self.saturation = saturation
+        ny, nx = self.D.shape
+        self.y1, self.y2 = y1, y2 or ny
+        self.x1, self.x2 = x1, x2 or nx
+        '''
+        # Initialize primary fitter.
+        self.fitter = desietcimg.fit.GaussFitter(stampsize)
+        # Initialize a slower secondary fitter for when the primary fitter fails to converge.
+        self.fitter2 = desietcimg.fit.GaussFitter(stampsize, optimize_args=dict(
+            method='Nelder-Mead', options=dict(maxiter=10000, xatol=1e-3, fatol=1e-3, disp=False)))
+        '''
+
+    def __call__(self, snrtot, xc, yc, yslice, xslice):
+        # Calculate the center of the input slice.
+        xc = 0.5 * (xslice.start + xslice.stop - 1)
+        yc = 0.5 * (yslice.start + yslice.stop - 1)
+        # Build a fixed-size stamp with this center.
+        ix = int(round(self.downsampling * xc))
+        if (ix < self.x1 + self.rsize) or (ix >= self.x2 - self.rsize):
+            return None
+        iy = int(round(self.downsampling * yc))
+        if (iy < self.y1 + self.rsize) or (iy >= self.y2 - self.rsize):
+            return None
+        xslice = slice(ix - self.rsize, ix + self.rsize + 1)
+        yslice = slice(iy - self.rsize, iy + self.rsize + 1)
+        # Extract and copy the stamp data.
+        d = self.D[yslice, xslice].copy()
+        w = self.W[yslice, xslice].copy()
+        # Count saturated pixels in this stamp.
+        if self.saturation is not None:
+            saturated = (d > self.saturation) & (w > 0)
+            nsaturated = np.count_nonzero(saturated)
+            if nsaturated > self.maxsaturated:
+                return None
+            w[saturated] = 0
+        '''
+        # Fit a single Gaussian + constant background to this stamp.
+        result = self.fitter.fit(d, w)
+        if not result['success']:
+            result = self.fitter2.fit(d, w)
+            if not result['success']:
+                return None
+        '''
+        ##fig, ax = desietcimg.plot.plot_data(d, w, downsampling=1, zoom=4)
+        ##plt.show()
+        return (yslice, xslice, d, w)
