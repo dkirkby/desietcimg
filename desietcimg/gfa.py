@@ -338,7 +338,7 @@ class GFACamera(object):
         else:
             raise ValueError('Invalid retval "{0}".'.format(retval))
 
-    def get_psfs(self, iexp=0, downsampling=2, margin=16, stampsize=45, minsnr=2.0, maxsrc=30):
+    def get_psfs(self, iexp=0, downsampling=2, margin=16, stampsize=45, minsnr=2.0, maxsrc=29):
         """Find PSF candidates in a specified exposure.
 
         For best results, estimate and subtract the dark current before calling this method.
@@ -352,10 +352,10 @@ class GFACamera(object):
         self.psfs = desietcimg.util.detect_sources(
             SNR, measure=M, minsnr=minsnr, minsep=0.7 * stampsize / downsampling, maxsrc=maxsrc)
         self.psf_stack = get_median_stack(
-            [desietcimg.util.normalize_stamp(*D[2:4]) for D in self.stamps])
+            [desietcimg.util.normalize_stamp(*D[2:4]) for D in self.psfs])
         return len(self.psfs)
 
-    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, minsnr=1.5, maxsrc=20):
+    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, minsnr=1.5, maxsrc=19):
         """Find donut candidates in each half of a specified exposure.
 
         For best results, estimate and subtract the dark current before calling this method.
