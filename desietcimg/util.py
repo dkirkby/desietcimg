@@ -230,6 +230,64 @@ def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, minsep=0, maxsrc=20, me
     return sources
 
 
+def estimate_bg(D, W, margin=4, maxchisq=2, minbgfrac=0.2):
+    """Estimate the background level from the margins of an image.
+
+    Parameters
+    ----------
+    D : array
+        2D array of pixel values.
+    W : array
+        2D array of corresponding inverse variances.
+    margin : int
+        Size of margin around the outside of the image to use to
+        estimate the background.
+    maxchisq : float
+        Maximum pixel chi-square value to consider a margin
+        pixel as background like.
+    minbgfrac : float
+        Minimum fraction of background-like margin pixels required
+        to use a weighted mean value estimate.  Otherwise, a
+        noisier but more robust median of unmasked margin pixel
+        values is returned.
+
+    Returns
+    -------
+    float
+        Estimate of the background level. Will be zero if all
+        margin pixels are masked.
+    """
+    mask = np.zeros(D.shape, bool)
+    mask[:margin] = mask[-margin:] = True
+    mask[:, :margin] = mask[:, -margin:] = True
+    # Find the median unmasked pixel value in the margin.
+    d = D[margin]
+    w = W[margin]
+    if not np.any(w > 0):
+        # There are no unmasked margin pixels.
+        return 0
+    med = np.median(d[w > 0])
+    # Find the median unmasked ivar in the margin.
+    sig = 1 / np.sqrt(np.median(w[w > 0]))
+    # Select bg-like pixels in the margin.
+    chisq = w * (d - med) ** 2
+    bg = (chisq < maxchisq) & (w > 0)
+    if np.count_nonzero(bg) < minbgfrac * d.size:
+        # Return the median when there are not enough bg pixels.
+        return med
+    else:
+        # Calculate a weighted mean of the bg pixels.
+        return np.sum(w[bg] * d[bg]) / np.sum(w[bg])
+
+
+def normalize_stamp(D, W):
+    """Normalize a stamp to its weighted mean value.
+    Should generally subtract a background estimate first.
+    """
+    norm = np.sum(D * W) / np.sum(W)
+    return D / np.abs(norm), W * norm ** 2
+
+
 def make_template(size, profile, dx=0, dy=0, oversampling=10, normalized=True):
     """Build a square template for an arbitrary profile.
 
