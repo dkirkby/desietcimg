@@ -256,7 +256,7 @@ def plot_pixels(D, label=None, colorhist=False, zoom=1, masked_color='cyan',
     return fig, ax
 
 
-def plot_data(D, W, downsampling=4, zoom=1, label=None, colorhist=False,
+def plot_data(D, W, downsampling=4, zoom=1, label=None, colorhist=False, stamps=[],
               preprocess_args={}, imshow_args={}, text_args={}, colorhist_args={}):
     """Plot weighted image data using downsampling, optional preprocessing, and decorators.
     """
@@ -270,8 +270,15 @@ def plot_data(D, W, downsampling=4, zoom=1, label=None, colorhist=False,
         # Use the input pixel space for the extent, without downsampling.
         ny, nx = D.shape
         args['extent'] = [-0.5, nx * downsampling - 0.5, -0.5, ny * downsampling - 0.5]
-    return plot_pixels(D, zoom=zoom, label=label, colorhist=colorhist,
-                       imshow_args=args, text_args=text_args, colorhist_args=colorhist_args)
+    fig, ax = plot_pixels(D, zoom=zoom, label=label, colorhist=colorhist,
+                          imshow_args=args, text_args=text_args, colorhist_args=colorhist_args)
+    for stamp in stamps:
+        yslice, xslice = stamp[:2]
+        xlo, xhi = xslice.start, xslice.stop
+        ylo, yhi = yslice.start, yslice.stop
+        ax.add_artist(plt.Rectangle((xlo, ylo), xhi - xlo, yhi - ylo,
+                                    fc='none', ec='w', alpha=0.75))
+    return fig, ax
 
 
 def plot_full_frame(D, W=None, saturation=None, downsampling=8, clip_pct=0.5, dpi=100, GCR=None,
