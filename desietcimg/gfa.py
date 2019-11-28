@@ -338,34 +338,44 @@ class GFACamera(object):
         else:
             raise ValueError('Invalid retval "{0}".'.format(retval))
 
-    def get_psfs(self, iexp=0, downsampling=2, margin=16):
+    def get_psfs(self, iexp=0, downsampling=2, margin=16, stampsize=45, minsnr=2.0, maxsrc=30):
         """Find PSF candidates in a specified exposure.
 
         For best results, estimate and subtract the dark current before calling this method.
         """
-        ny, nx = 2 * self.nampy, 2 * self.nampx
-        SNR = desietcimg.util.get_significance(
-            self.data[iexp], self.ivar[iexp], downsampling=downsampling)
+        D, W = self.data[iexp], self.ivar[iexp]
+        ny, nx = D.shape
+        SNR = desietcimg.util.get_significance(D, W, downsampling=downsampling)
         M = GFASourceMeasure(
-            self.data[iexp], self.ivar[iexp], margin, ny - margin, margin, nx - margin,
-            stampsize=45, downsampling=downsampling)
-        self.psfs = desietcimg.util.detect_sources(SNR, measure=M, minsnr=2.5, maxsrc=30)
+            D, W, margin, ny - margin, margin, nx - margin,
+            stampsize=stampsize, downsampling=downsampling)
+        self.psfs = desietcimg.util.detect_sources(
+            SNR, measure=M, minsnr=minsnr, minsep=0.7 * stampsize / downsampling, maxsrc=maxsrc)
+        self.psf_stack = get_median_stack(
+            [desietcimg.util.normalize_stamp(*D[2:4]) for D in self.stamps])
         return len(self.psfs)
 
-    def get_donuts(self, iexp=0, downsampling=2, margin=16):
-        ny, nx = 2 * self.nampy, 2 * self.nampx
-        SNR = desietcimg.util.get_significance(
-            self.data[iexp], self.ivar[iexp], downsampling=downsampling)
-        ML = GFASourceMeasure(
-            self.data[iexp], self.ivar[iexp], margin, ny - margin, margin, 900,
-            stampsize=65, downsampling=downsampling)
-        MR = GFASourceMeasure(
-            self.data[iexp], self.ivar[iexp], margin, ny - margin, nx - 900, nx - margin,
-            stampsize=65, downsampling=downsampling)
-        args = dict(minsnr=2.5, minsep=45 / downsampling, maxsrc=15)
+    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, minsnr=1.5, maxsrc=20):
+        """Find donut candidates in each half of a specified exposure.
+
+        For best results, estimate and subtract the dark current before calling this method.
+        """
+        D, W = self.data[iexp], self.ivar[iexp]
+        ny, nx = D.shape
+        # Compute a single SNR image to use for both halves.
+        SNR = desietcimg.util.get_significance(D, W, downsampling=downsampling)
+        # Configure the measurements for each half.
+        args = dict(stampsize=stampsize, downsampling=downsampling)
+        ML = GFASourceMeasure(D, W, margin, ny - margin, margin, 900, **args)
+        MR = GFASourceMeasure(D, W, margin, ny - margin, nx - 900, nx - margin, **args)
+        # Configure and run the source detection for each half.
+        args = dict(minsnr=minsnr, minsep=0.7 * stampsize / downsampling, maxsrc=maxsrc)
         self.donuts = (
             desietcimg.util.detect_sources(SNR, measure=ML, **args),
             desietcimg.util.detect_sources(SNR, measure=MR, **args))
+        self.donut_stack = (
+            get_median_stack([desietcimg.util.normalize_stamp(*D[2:4]) for D in self.donuts[0]]),
+            get_median_stack([desietcimg.util.normalize_stamp(*D[2:4]) for D in self.donuts[1]]))
         return len(self.donuts[0]), len(self.donuts[1])
 
 
@@ -373,7 +383,7 @@ class GFASourceMeasure(object):
     """Measure candidate sources in D[y1:y2, x1:x2]
     """
     def __init__(self, D, W, y1=0, y2=None, x1=0, x2=None, stampsize=45,
-                 downsampling=2, maxsaturated=3, saturation=1e5):
+                 downsampling=2, maxsaturated=3, saturation=1e5, bgmargin=4):
         assert stampsize % 2 == 1
         self.rsize = stampsize // 2
         self.downsampling = downsampling
@@ -415,6 +425,8 @@ class GFASourceMeasure(object):
             if nsaturated > self.maxsaturated:
                 return None
             w[saturated] = 0
+        # Estimate and subtract the background.
+        d -= desietcimg.util.estimate_bg(d, w)
         '''
         # Fit a single Gaussian + constant background to this stamp.
         result = self.fitter.fit(d, w)
@@ -426,3 +438,51 @@ class GFASourceMeasure(object):
         ##fig, ax = desietcimg.plot.plot_data(d, w, downsampling=1, zoom=4)
         ##plt.show()
         return (yslice, xslice, d, w)
+
+
+def get_median_stack(stamps, maxdither=3, maxdist=5):
+    """Calculate the median stack of PSF or donut stamps.
+    """
+    ny, nx = stamps[0][0].shape
+    nstamp = len(stamps)
+    distances = np.zeros((nstamp, nstamp))
+    dithers = np.zeros((nstamp, nstamp, 2), int)
+    for i in range(nstamp - 1):
+        D1, W1 = stamps[i]
+        for j in range(i + 1, nstamp):
+            D2, W2 = stamps[j]
+            dist, dither = desietcimg.util.get_stamp_distance(
+                D1, W1, D2, W2, maxdither=maxdither)
+            dithers[i, j] = dither
+            dithers[j, i] = -dither
+            distances[i, j] = distances[j, i] = dist
+    # Find the medioid stamp.
+    imed = np.argmin(distances.sum(axis=0))
+    # Assemble dithered stamps in order of their distance to the mediod.
+    stack = []
+    DWsum = np.zeros((ny - 2 * maxdither, nx - 2 * maxdither))
+    Wstack = np.zeros((ny - 2 * maxdither, nx - 2 * maxdither))
+    nsum = 0
+    for j in np.argsort(distances[imed]):
+        D, W = stamps[j]
+        dy, dx = dithers[imed, j]
+        Dinset = D[maxdither + dy:ny - maxdither + dy, maxdither + dx:nx - maxdither + dx]
+        Winset = W[maxdither + dy:ny - maxdither + dy, maxdither + dx:nx - maxdither + dx]
+        if nsum == 0:
+            DWsum = Winset * Dinset
+            Wstack = Winset.copy()
+            dist = 0
+            nsum = 1
+        else:
+            # Calculate the distance between the running stack and this stamp (with no dither).
+            Dstack = np.divide(DWsum, Wstack, out=np.zeros_like(DWsum), where=Wstack>0)
+            dist, dither = desietcimg.util.get_stamp_distance(
+                Dstack, Wstack, Dinset, Winset, maxdither=0)
+            if dist < maxdist:
+                DWsum += Winset * Dinset
+                Wstack += Winset
+                nsum += 1
+        stack.append((dist, Dinset, Winset))
+    Dstack = np.divide(DWsum, Wstack, out=np.zeros_like(DWsum), where=Wstack>0)
+    stack.insert(0, (-nsum, Dstack, Wstack))
+    return stack
