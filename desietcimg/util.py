@@ -288,6 +288,33 @@ def normalize_stamp(D, W):
     return D / np.abs(norm), W * norm ** 2
 
 
+def get_stamp_distance(D1, W1, D2, W2, maxdither=3):
+    """Calculate the minimum chisq distance between two stamps allowing for some dither.
+    """
+    ny, nx = D1.shape
+    assert D1.shape == D2.shape == W1.shape == W2.shape
+    # Inset the first stamp by the dither size.
+    D1inset = D1[maxdither:ny - maxdither, maxdither:nx - maxdither]
+    W1inset = W1[maxdither:ny - maxdither, maxdither:nx - maxdither]
+    # Loop over dithers of the second stamp.
+    distsq = np.empty((2 * maxdither + 1, 2 * maxdither + 1))
+    dxy = np.arange(-maxdither, maxdither + 1)
+    for dy in dxy:
+        for dx in dxy:
+            # Dither the second stamp.
+            D2inset = D2[maxdither + dy:ny - maxdither + dy, maxdither + dx:nx - maxdither + dx]
+            W2inset = W2[maxdither + dy:ny - maxdither + dy, maxdither + dx:nx - maxdither + dx]
+            # Calculate the chi-square distance between the inset stamps.
+            num = W1inset * W2inset * (D1inset - D2inset) ** 2
+            pull = np.divide(num, W1inset + W2inset, out=np.zeros_like(num), where=num > 0)
+            distsq[maxdither + dy, maxdither + dx] = pull.sum()
+    # Find the dither with the smallest distance.
+    iy, ix = np.unravel_index(np.argmin(distsq.reshape(-1)), distsq.shape)
+    assert distsq.min() == distsq[iy, ix]
+    # Return the smallest distance and the corresponding dither.
+    return np.sqrt(distsq[iy, ix] / D1inset.size), np.array((dxy[iy], dxy[ix]), int)
+
+
 def make_template(size, profile, dx=0, dy=0, oversampling=10, normalized=True):
     """Build a square template for an arbitrary profile.
 
