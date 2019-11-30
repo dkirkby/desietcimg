@@ -93,6 +93,15 @@ def preprocess(D, W, nsig_lo=10, nsig_hi=30, vmin=None, vmax=None):
     return D
 
 
+def smooth(D, W, smoothing):
+    """Apply a weighted Gaussian smoothing.
+    """
+    WD = scipy.ndimage.gaussian_filter(W * D, smoothing)
+    W = scipy.ndimage.gaussian_filter(W, smoothing)
+    D = np.divide(WD, W, out=np.zeros_like(D), where=W > 0)
+    return D, W
+
+
 def get_significance(D, W, smoothing=2.5, downsampling=2, medfiltsize=5):
     """Calculate a downsampled pixel significance image.
 
@@ -127,9 +136,7 @@ def get_significance(D, W, smoothing=2.5, downsampling=2, medfiltsize=5):
         returned dimensions are downsampled relative to the input arrays.
     """
     # Apply weighted smoothing.
-    WD = scipy.ndimage.gaussian_filter(W * D, smoothing)
-    W = scipy.ndimage.gaussian_filter(W, smoothing)
-    D = np.divide(WD, W, out=np.zeros_like(D), where=W > 0)
+    D, W = smooth(D, W, smoothing)
     # Downsample.
     D, W = downsample_weighted(D, W, downsampling=downsampling, allow_trim=False)
     # Median filter the data to estimate background variations.
@@ -280,39 +287,52 @@ def estimate_bg(D, W, margin=4, maxchisq=2, minbgfrac=0.2):
         return np.sum(w[bg] * d[bg]) / np.sum(w[bg])
 
 
-def normalize_stamp(D, W):
+def normalize_stamp(D, W, smoothing=2.5):
     """Normalize a stamp to its weighted mean value.
     Should generally subtract a background estimate first.
     """
-    norm = np.sum(D * W) / np.sum(W)
-    return D / np.abs(norm), W * norm ** 2
+    smoothed, _ = smooth(D, W, smoothing)
+    norm = smoothed.sum()
+    if norm != 0:
+        return D / np.abs(norm), W * norm ** 2
 
 
-def get_stamp_distance(D1, W1, D2, W2, maxdither=3):
+def get_stamp_distance(D1, W1, D2, W2, maxdither=3, smoothing=1, fscale=np.linspace(0.85, 1.15, 11)):
     """Calculate the minimum chisq distance between two stamps allowing for some dither.
     """
     ny, nx = D1.shape
     assert D1.shape == D2.shape == W1.shape == W2.shape
+    nscale = len(fscale)
+    fvec = fscale.reshape(-1, 1, 1)
+    # Smooth both stamps.
+    D1, W1 = desietcimg.util.smooth(D1, W1, smoothing)
+    D2, W2 = desietcimg.util.smooth(D2, W2, smoothing)
     # Inset the first stamp by the dither size.
-    D1inset = D1[maxdither:ny - maxdither, maxdither:nx - maxdither]
-    W1inset = W1[maxdither:ny - maxdither, maxdither:nx - maxdither]
+    inset = slice(maxdither, ny - maxdither), slice(maxdither, nx - maxdither)
+    D1inset = D1[inset]
+    W1inset = W1[inset]
     # Loop over dithers of the second stamp.
-    distsq = np.empty((2 * maxdither + 1, 2 * maxdither + 1))
+    ndither = 2 * maxdither + 1
+    pull = np.zeros((ndither, ndither, nscale, ny - 2 * maxdither, nx - 2 * maxdither))
     dxy = np.arange(-maxdither, maxdither + 1)
-    for dy in dxy:
-        for dx in dxy:
+    for iy, dy in enumerate(dxy):
+        for ix, dx in enumerate(dxy):
             # Dither the second stamp.
             D2inset = D2[maxdither + dy:ny - maxdither + dy, maxdither + dx:nx - maxdither + dx]
             W2inset = W2[maxdither + dy:ny - maxdither + dy, maxdither + dx:nx - maxdither + dx]
-            # Calculate the chi-square distance between the inset stamps.
-            num = W1inset * W2inset * (D1inset - D2inset) ** 2
-            pull = np.divide(num, W1inset + W2inset, out=np.zeros_like(num), where=num > 0)
-            distsq[maxdither + dy, maxdither + dx] = pull.sum()
-    # Find the dither with the smallest distance.
-    iy, ix = np.unravel_index(np.argmin(distsq.reshape(-1)), distsq.shape)
-    assert distsq.min() == distsq[iy, ix]
-    # Return the smallest distance and the corresponding dither.
-    return np.sqrt(distsq[iy, ix] / D1inset.size), np.array((dxy[iy], dxy[ix]), int)
+            # Calculate the chi-square distance between the inset stamps with scale factors of
+            # 1/fvec and fvec applied to (D1,W1) and (D2,W2) respectively.
+            num = np.sqrt(W1inset * W2inset) * (D1inset / fvec - D2inset * fvec)
+            denom = np.sqrt(W1inset * fvec ** 2 + W2inset * fvec ** -2)
+            # Could also use where=(num > 0) here.
+            pull[iy, ix] = np.divide(num, denom, out=np.zeros_like(num), where=denom > 0)
+    # Find the dither with the smallest chisq.
+    chisq = np.sum(pull ** 2, axis=(3, 4))
+    iy, ix, iscale = np.unravel_index(np.argmin(chisq.reshape(-1)), (ndither, ndither, nscale))
+    assert chisq.min() == chisq[iy, ix, iscale]
+    # Return the smallest distance, the corresponding dither and scale, and the best pull image.
+    return (chisq[iy, ix, iscale] / D1inset.size, np.array((dxy[iy], dxy[ix]), int),
+            fscale[iscale], pull[iy, ix, iscale].copy())
 
 
 def make_template(size, profile, dx=0, dy=0, oversampling=10, normalized=True):
