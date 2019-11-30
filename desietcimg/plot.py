@@ -434,3 +434,92 @@ def plot_stack(stack, cmap='plasma_r', masked_color='cyan'):
         ax.imshow(z, interpolation='none', origin='lower', vmin=vmin, vmax=vmax, cmap=cmap)
         ax.text(0.5, 0, f'{dist:.5f}', transform=ax.transAxes, fontsize=12, color='k',
                 verticalalignment='bottom', horizontalalignment='center')
+
+
+def plot_distance_matrix(stamps, cmap='magma', masked_color='cyan', dpi=100, zoom=1, smoothing=1, maxdither=3, maxdist=3.):
+    nstamps = len(stamps)
+    # Extract and normalize stamps.
+    stamps = [desietcimg.util.normalize_stamp(*S[2:4]) for S in stamps]
+    # Calculate the median stamp.
+    Dmed = np.median(np.stack([D for D, W in stamps]), axis=0)
+    # Calculate the weighted average stamp.
+    DWsum = np.sum(np.stack([D * W for D, W in stamps]), axis=0)
+    Wavg = np.sum(np.stack([W for D, W in stamps]), axis=0)
+    Davg = np.divide(DWsum, Wavg, out=np.zeros_like(DWsum), where=Wavg > 0)
+    Davg, Wavg = desietcimg.util.normalize_stamp(Davg, Wavg)
+    # Calculate plot limits from the median stamp.
+    vmin, vmax = np.percentile(Dmed, (1, 99))
+    # Initialize figure.
+    ny, nx = (stamps[0][0]).shape
+    assert ny == nx
+    dxy = (ny - 2 * maxdither - 1) * zoom
+    size = nstamps * dxy
+    inset = slice(maxdither, ny - maxdither), slice(maxdither, nx - maxdither)
+    fig = plt.figure(figsize=(size / dpi, size / dpi), dpi=dpi, frameon=False)
+    cmap = matplotlib.cm.get_cmap(cmap)
+    cmap.set_bad(color=masked_color)
+    def create_axis(i, j, expand=1):
+        ax = plt.axes((i * dxy / size, j * dxy / size, expand * dxy / size, expand * dxy / size))
+        ax.axis('off')
+        return ax
+    def imshow(z, ax, label, label_color, **args):
+        ax.imshow(z, interpolation='none', origin='lower', **args)
+        ax.text(0.5, 0, label, transform=ax.transAxes, fontsize=10, color=label_color,
+                verticalalignment='bottom', horizontalalignment='center')
+    def plot_stamp(D, W, ax, label):
+        d = D.copy()
+        if W is not None:
+            d[W == 0] = 0
+        imshow(d, ax, label, 'w', vmin=vmin, vmax=vmax, cmap=cmap)
+    def plot_pull(pull, ax, vlim=5):
+        chisq = np.sum(pull ** 2) / pull.size
+        imshow(pull, ax, f'{chisq:.2f}', 'k', vmin=-vlim, vmax=+vlim, cmap='RdYlBu')
+    # Plot the median stamp.
+    expand = nstamps // 4
+    ax = create_axis(0, nstamps - expand, expand)
+    plot_stamp(Dmed[inset], None, ax, 'median')
+    ax = create_axis(expand, nstamps - expand, expand)
+    plot_stamp(Davg[inset], Wavg[inset], ax, 'weighted average')
+    # Calculate distance matrix and plot pulls for each pair.
+    dist = np.zeros((nstamps, nstamps))
+    dither = np.zeros((nstamps, nstamps, 2), int)
+    fscale = np.ones((nstamps, nstamps))
+    for j in range(nstamps):
+        D1, W1 = stamps[j]
+        for i in range(j + 1, nstamps):
+            D2, W2 = stamps[i]
+            dist_ji, dither_ji, fscale_ji, pull = desietcimg.util.get_stamp_distance(
+                D1, W1, D2, W2, maxdither=maxdither, smoothing=smoothing)
+            dist[i, j] = dist[j, i] = dist_ji
+            dither[j, i] = dither_ji
+            dither[i, j] = -dither_ji
+            fscale[j, i] = fscale_ji
+            fscale[i, j] = 1 / fscale_ji
+            plot_pull(pull, create_axis(i, j))
+    # Plot stamps along the diagonal.
+    totdist = dist.sum(axis=1)
+    for j in range(nstamps):
+        D, W = stamps[j]
+        # Plot stamps along the diagonal.
+        plot_stamp(D[inset], W[inset], create_axis(j, j), f'{totdist[j]:.2f}')
+    # Find and plot the medioid stamp.
+    imed = np.argmin(totdist)
+    Dmedioid, Wmedioid = stamps[imed]
+    ax = create_axis(0, nstamps - 2 * expand, expand)
+    plot_stamp(Dmedioid[inset], Wmedioid[inset], ax, 'medioid')
+    # Calculate and plot the final stack.
+    ndither = 2 * maxdither + 1
+    DWstack = np.zeros((ny - 2 * maxdither, nx - 2 * maxdither))
+    Wstack = np.zeros_like(DWstack)
+    for j in np.where(dist[imed] < maxdist)[0]:
+        D, W = stamps[j]
+        dy, dx = dither[imed, j]
+        f = fscale[imed, j]
+        inset_j = slice(maxdither + dy, ny - maxdither + dy), slice(maxdither + dx, nx - maxdither + dx)
+        Dj, Wj = f * D[inset_j], W[inset_j] / f ** 2
+        DWstack += Dj * Wj
+        Wstack += Wj
+    Dstack = np.divide(DWstack, Wstack, out=np.zeros_like(DWstack), where=Wstack > 0)
+    Dstack, Wstack = desietcimg.util.normalize_stamp(Dstack, Wstack)
+    ax = create_axis(expand, nstamps - 2 * expand, expand)
+    plot_stamp(Dstack, Wstack, ax, 'stack')

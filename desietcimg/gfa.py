@@ -351,8 +351,8 @@ class GFACamera(object):
             stampsize=stampsize, downsampling=downsampling)
         self.psfs = desietcimg.util.detect_sources(
             SNR, measure=M, minsnr=minsnr, minsep=0.7 * stampsize / downsampling, maxsrc=maxsrc)
-        self.psf_stack = get_median_stack(
-            [desietcimg.util.normalize_stamp(*D[2:4]) for D in self.psfs])
+        #self.psf_stack = get_median_stack(
+        #    [desietcimg.util.normalize_stamp(*D[2:4]) for D in self.psfs])
         return len(self.psfs)
 
     def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, minsnr=1.5, maxsrc=19):
@@ -373,9 +373,9 @@ class GFACamera(object):
         self.donuts = (
             desietcimg.util.detect_sources(SNR, measure=ML, **args),
             desietcimg.util.detect_sources(SNR, measure=MR, **args))
-        self.donut_stack = (
-            get_median_stack([desietcimg.util.normalize_stamp(*D[2:4]) for D in self.donuts[0]]),
-            get_median_stack([desietcimg.util.normalize_stamp(*D[2:4]) for D in self.donuts[1]]))
+        #self.donut_stack = (
+        #    get_median_stack([desietcimg.util.normalize_stamp(*D[2:4]) for D in self.donuts[0]]),
+        #    get_median_stack([desietcimg.util.normalize_stamp(*D[2:4]) for D in self.donuts[1]]))
         return len(self.donuts[0]), len(self.donuts[1])
 
 
@@ -440,7 +440,7 @@ class GFASourceMeasure(object):
         return (yslice, xslice, d, w)
 
 
-def get_median_stack(stamps, maxdither=3, maxdist=5):
+def get_median_stack(stamps, maxdither=3, maxdist=4):
     """Calculate the median stack of PSF or donut stamps.
     """
     nstamp = len(stamps)
@@ -470,6 +470,7 @@ def get_median_stack(stamps, maxdither=3, maxdist=5):
         dy, dx = dithers[imed, j]
         Dinset = D[maxdither + dy:ny - maxdither + dy, maxdither + dx:nx - maxdither + dx]
         Winset = W[maxdither + dy:ny - maxdither + dy, maxdither + dx:nx - maxdither + dx]
+        Dinset, Winset = desietcimg.util.normalize_stamp(Dinset, Winset)
         if nsum == 0:
             DWsum = Winset * Dinset
             Wstack = Winset.copy()
@@ -478,6 +479,10 @@ def get_median_stack(stamps, maxdither=3, maxdist=5):
         else:
             # Calculate the distance between the running stack and this stamp (with no dither).
             Dstack = np.divide(DWsum, Wstack, out=np.zeros_like(DWsum), where=Wstack>0)
+            norm = Dstack.sum()
+            Dstack /= norm
+            Wstack *= norm ** 2
+            DWsum *= norm
             dist, dither = desietcimg.util.get_stamp_distance(
                 Dstack, Wstack, Dinset, Winset, maxdither=0)
             if dist < maxdist:

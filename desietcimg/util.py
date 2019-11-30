@@ -305,8 +305,8 @@ def get_stamp_distance(D1, W1, D2, W2, maxdither=3, smoothing=1, fscale=np.linsp
     nscale = len(fscale)
     fvec = fscale.reshape(-1, 1, 1)
     # Smooth both stamps.
-    D1, W1 = desietcimg.util.smooth(D1, W1, smoothing)
-    D2, W2 = desietcimg.util.smooth(D2, W2, smoothing)
+    D1, W1 = smooth(D1, W1, smoothing)
+    D2, W2 = smooth(D2, W2, smoothing)
     # Inset the first stamp by the dither size.
     inset = slice(maxdither, ny - maxdither), slice(maxdither, nx - maxdither)
     D1inset = D1[inset]
