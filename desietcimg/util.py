@@ -342,6 +342,54 @@ def get_stamp_distance(D1, W1, D2, W2, maxdither=3, smoothing=1, fscale=np.linsp
             fscale[iscale], pull[iy, ix, iscale].copy())
 
 
+def get_stacked(stamps, smoothing=1, maxdither=3, maxdist=3, min_stack=3):
+    """Calculate a stack of detected sources ignoring outliers.
+    """
+    # Extract and normalize stamps.
+    nstamps = len(stamps)
+    stamps = [normalize_stamp(*S[2:4]) for S in stamps]
+    # Calculate distance matrix and record best dithers and scales.
+    dist = np.zeros((nstamps, nstamps))
+    dither = np.zeros((nstamps, nstamps, 2), int)
+    fscale = np.ones((nstamps, nstamps))
+    for j in range(nstamps):
+        D1, W1 = stamps[j]
+        for i in range(j + 1, nstamps):
+            D2, W2 = stamps[i]
+            dist_ji, dither_ji, fscale_ji, _ = get_stamp_distance(
+                D1, W1, D2, W2, maxdither=maxdither, smoothing=smoothing)
+            dist[i, j] = dist[j, i] = dist_ji
+            dither[j, i] = dither_ji
+            dither[i, j] = -dither_ji
+            fscale[j, i] = fscale_ji
+            fscale[i, j] = 1 / fscale_ji
+    # Find the medioid stamp.
+    totdist = dist.sum(axis=1)
+    imed = np.argmin(totdist)
+    # How many other stamps are close enough to stack?
+    stack_idx = np.where(dist[imed] < maxdist)[0]
+    if len(stack_idx) < min_stack:
+        # Calculate and return the weighted average stamp.
+        DWsum = np.sum(np.stack([D * W for D, W in stamps]), axis=0)
+        Wavg = np.sum(np.stack([W for D, W in stamps]), axis=0)
+        Davg = np.divide(DWsum, Wavg, out=np.zeros_like(DWsum), where=Wavg > 0)
+        return normalize_stamp(Davg, Wavg)
+    # Calculate the final stack.
+    ndither = 2 * maxdither + 1
+    DWstack = np.zeros((ny - 2 * maxdither, nx - 2 * maxdither))
+    Wstack = np.zeros_like(DWstack)
+    for j in stack_idx:
+        D, W = stamps[j]
+        dy, dx = dither[imed, j]
+        f = fscale[imed, j]
+        inset_j = slice(maxdither + dy, ny - maxdither + dy), slice(maxdither + dx, nx - maxdither + dx)
+        Dj, Wj = f * D[inset_j], W[inset_j] / f ** 2
+        DWstack += Dj * Wj
+        Wstack += Wj
+    Dstack = np.divide(DWstack, Wstack, out=np.zeros_like(DWstack), where=Wstack > 0)
+    return normalize_stamp(Dstack, Wstack)
+
+
 def make_template(size, profile, dx=0, dy=0, oversampling=10, normalized=True):
     """Build a square template for an arbitrary profile.
 
