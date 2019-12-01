@@ -376,7 +376,8 @@ def get_stacked(stamps, smoothing=1, maxdither=3, maxdist=3, min_stack=3):
         DWsum = np.sum(np.stack([D * W for D, W in stamps]), axis=0)
         Wavg = np.sum(np.stack([W for D, W in stamps]), axis=0)
         Davg = np.divide(DWsum, Wavg, out=np.zeros_like(DWsum), where=Wavg > 0)
-        return normalize_stamp(Davg, Wavg)
+        inset = slice(maxdither, ny - maxdither), slice(maxdither, nx - maxdither)
+        return normalize_stamp(Davg[inset], Wavg[inset])
     # Calculate the final stack.
     ndither = 2 * maxdither + 1
     DWstack = np.zeros((ny - 2 * maxdither, nx - 2 * maxdither))
