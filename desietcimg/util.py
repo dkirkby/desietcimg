@@ -347,7 +347,10 @@ def get_stacked(stamps, smoothing=1, maxdither=3, maxdist=3, min_stack=3):
     """
     # Extract and normalize stamps.
     nstamps = len(stamps)
+    if nstamps == 0:
+        return None, None
     stamps = [normalize_stamp(*S[2:4]) for S in stamps]
+    ny, nx = (stamps[0][0]).shape
     # Calculate distance matrix and record best dithers and scales.
     dist = np.zeros((nstamps, nstamps))
     dither = np.zeros((nstamps, nstamps, 2), int)

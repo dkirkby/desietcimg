@@ -351,7 +351,7 @@ class GFACamera(object):
             stampsize=stampsize, downsampling=downsampling)
         self.psfs = desietcimg.util.detect_sources(
             SNR, measure=M, minsnr=minsnr, minsep=0.7 * stampsize / downsampling, maxsrc=maxsrc)
-        self.psf_stack = desisurvey.util.get_stacked(self.psfs)
+        self.psf_stack = desietcimg.util.get_stacked(self.psfs)
         return len(self.psfs)
 
     def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, minsnr=1.5, maxsrc=19):
@@ -373,9 +373,26 @@ class GFACamera(object):
             desietcimg.util.detect_sources(SNR, measure=ML, **args),
             desietcimg.util.detect_sources(SNR, measure=MR, **args))
         self.donut_stack = (
-            desisurvey.util.get_stacked(self.donuts[0]),
-            desisurvey.util.get_stacked(self.donuts[1]))
+            desietcimg.util.get_stacked(self.donuts[0]),
+            desietcimg.util.get_stacked(self.donuts[1]))
         return len(self.donuts[0]), len(self.donuts[1])
+
+    def find_sources(self, filename, outname):
+        with fitsio.FITS(outname, 'rw', clobber=True) as hdus:
+            hdus.write(np.zeros((1,), dtype=np.float32))
+            for gfa in self.gfa_names:
+                raw, meta = desietcimg.util.load_raw([str(filename)], 'EXPTIME', 'GCCDTEMP', hdu=gfa)
+                self.setraw(raw, name=gfa)
+                self.data -= self.get_dark_current(meta['GCCDTEMP'], meta['EXPTIME'], method='linear')
+                if gfa.startswith('GUIDE'):
+                    self.get_psfs()
+                    if self.psf_stack is not None:
+                        hdus.write(np.stack(self.psf_stack).astype(np.float32), extname=gfa)
+                else:
+                    self.get_donuts()
+                    for stack, side in zip(self.donut_stack, 'LR'):
+                        if stack is not None:
+                            hdus.write(np.stack(stack).astype(np.float32), extname=gfa+side)
 
 
 class GFASourceMeasure(object):
