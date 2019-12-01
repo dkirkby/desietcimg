@@ -381,9 +381,20 @@ class GFACamera(object):
         with fitsio.FITS(outname, 'rw', clobber=True) as hdus:
             hdus.write(np.zeros((1,), dtype=np.float32))
             for gfa in self.gfa_names:
-                raw, meta = desietcimg.util.load_raw([str(filename)], 'EXPTIME', 'GCCDTEMP', hdu=gfa)
-                self.setraw(raw, name=gfa)
-                self.data -= self.get_dark_current(meta['GCCDTEMP'], meta['EXPTIME'], method='linear')
+                try:
+                    raw, meta = desietcimg.util.load_raw([str(filename)], 'EXPTIME', 'GCCDTEMP', hdu=gfa)
+                except OSError as e:
+                    logging.error('Unable to read hdu {0} from {1}'.format(gfa, filename))
+                    return
+                if not meta['EXPTIME'] or not meta['GCCDTEMP']:
+                    logging.error('Missing required metadata for {0} in {1}'.format(gfa, filename))
+                    return
+                try:
+                    self.setraw(raw, name=gfa)
+                    self.data -= self.get_dark_current(meta['GCCDTEMP'], meta['EXPTIME'], method='linear')
+                except ValueError as e:
+                    logging.error(e)
+                    return
                 if gfa.startswith('GUIDE'):
                     self.get_psfs()
                     if self.psf_stack is not None:
