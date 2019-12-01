@@ -436,7 +436,8 @@ def plot_stack(stack, cmap='plasma_r', masked_color='cyan'):
                 verticalalignment='bottom', horizontalalignment='center')
 
 
-def plot_distance_matrix(stamps, cmap='magma', masked_color='cyan', dpi=100, zoom=1, smoothing=1, maxdither=3, maxdist=3.):
+def plot_distance_matrix(stamps, cmap='magma', masked_color='cyan', dpi=100, maxsize=1024,
+                         smoothing=1, maxdither=3, maxdist=3.):
     nstamps = len(stamps)
     # Extract and normalize stamps.
     stamps = [desietcimg.util.normalize_stamp(*S[2:4]) for S in stamps]
@@ -452,7 +453,9 @@ def plot_distance_matrix(stamps, cmap='magma', masked_color='cyan', dpi=100, zoo
     # Initialize figure.
     ny, nx = (stamps[0][0]).shape
     assert ny == nx
-    dxy = (ny - 2 * maxdither - 1) * zoom
+    ndither = 2 * maxdither + 1
+    zoom = max(1, maxsize // (nstamps * (ny - ndither)))
+    dxy = (ny - ndither) * zoom
     size = nstamps * dxy
     inset = slice(maxdither, ny - maxdither), slice(maxdither, nx - maxdither)
     fig = plt.figure(figsize=(size / dpi, size / dpi), dpi=dpi, frameon=False)
@@ -475,7 +478,7 @@ def plot_distance_matrix(stamps, cmap='magma', masked_color='cyan', dpi=100, zoo
         chisq = np.sum(pull ** 2) / pull.size
         imshow(pull, ax, f'{chisq:.2f}', 'k', vmin=-vlim, vmax=+vlim, cmap='RdYlBu')
     # Plot the median stamp.
-    expand = nstamps // 4
+    expand = (nstamps - 1) / 4
     ax = create_axis(0, nstamps - expand, expand)
     plot_stamp(Dmed[inset], None, ax, 'median')
     ax = create_axis(expand, nstamps - expand, expand)

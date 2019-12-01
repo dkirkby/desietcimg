@@ -149,7 +149,8 @@ def get_significance(D, W, smoothing=2.5, downsampling=2, medfiltsize=5):
     return D * np.sqrt(W)
 
 
-def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, minsep=0, maxsrc=20, measure=None):
+def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, minsep=0,
+                   min_snr_ratio=0.1, maxsrc=20, measure=None):
     """Detect and measure sources in a significance image.
 
     A source is defined as a connected and isolated region of pixels above
@@ -203,6 +204,7 @@ def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, minsep=0, maxsrc=20, me
     snrtot = scipy.ndimage.labeled_comprehension(
         snr, labeled, labels, out_dtype=float, default=-1,
         func=lambda X: np.sqrt(np.sum(X ** 2)))
+    maxsnrtot = None
     # Rank sources by snrtot.
     ranks = np.argsort(snrtot)[::-1]
     # Build the final list of detected sources.
@@ -212,6 +214,9 @@ def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, minsep=0, maxsrc=20, me
     centroids = np.empty((maxsrc, 2))
     for idx in range(nlabels):
         label = labels[ranks[idx]]
+        srcsnrtot = snrtot[label - 1]
+        if maxsnrtot is not None and srcsnrtot < min_snr_ratio * maxsnrtot:
+            break
         # Lookup this source's bounding box.
         yslice, xslice = bboxes[label - 1]
         size = max(yslice.stop - yslice.start, xslice.stop - xslice.start)
@@ -225,12 +230,14 @@ def detect_sources(snr, minsnr=4, minsize=8, maxsize=32, minsep=0, maxsrc=20, me
             rsq = np.sum((centroids[:nsrc] - np.array([xc, yc])) ** 2, axis=1)
             if np.any(rsq < minsepsq):
                 continue
-        params = (snrtot[label - 1], xc, yc, yslice, xslice)
+        params = (srcsnrtot, xc, yc, yslice, xslice)
         if measure is not None:
             params = measure(*params)
             if params is None:
                 continue
         centroids[nsrc] = (xc, yc)
+        if maxsnrtot is None:
+            maxsnrtot = srcsnrtot
         sources.append(params)
         if len(sources) == maxsrc:
             break
