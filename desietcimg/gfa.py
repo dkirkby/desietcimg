@@ -338,7 +338,8 @@ class GFACamera(object):
         else:
             raise ValueError('Invalid retval "{0}".'.format(retval))
 
-    def get_psfs(self, iexp=0, downsampling=2, margin=16, stampsize=45, minsnr=2.0, maxsrc=29, stack=True):
+    def get_psfs(self, iexp=0, downsampling=2, margin=16, stampsize=45, minsnr=2.0, min_snr_ratio=0.1,
+                 maxsrc=29, stack=True):
         """Find PSF candidates in a specified exposure.
 
         For best results, estimate and subtract the dark current before calling this method.
@@ -350,14 +351,16 @@ class GFACamera(object):
             D, W, margin, ny - margin, margin, nx - margin,
             stampsize=stampsize, downsampling=downsampling)
         self.psfs = desietcimg.util.detect_sources(
-            SNR, measure=M, minsnr=minsnr, minsep=0.7 * stampsize / downsampling, maxsrc=maxsrc)
+            SNR, measure=M, minsnr=minsnr, minsep=0.7 * stampsize / downsampling, maxsrc=maxsrc,
+            min_snr_ratio=min_snr_ratio)
         if stack:
             self.psf_stack = desietcimg.util.get_stacked(self.psfs)
         else:
             self.psf_stack = None
         return len(self.psfs)
 
-    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, minsnr=1.5, maxsrc=19, stack=True):
+    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, minsnr=1.5, min_snr_ratio=0.1,
+                   maxsrc=19, column_cut=900, stack=True):
         """Find donut candidates in each half of a specified exposure.
 
         For best results, estimate and subtract the dark current before calling this method.
@@ -368,10 +371,11 @@ class GFACamera(object):
         SNR = desietcimg.util.get_significance(D, W, downsampling=downsampling)
         # Configure the measurements for each half.
         args = dict(stampsize=stampsize, downsampling=downsampling)
-        ML = GFASourceMeasure(D, W, margin, ny - margin, margin, 900, **args)
-        MR = GFASourceMeasure(D, W, margin, ny - margin, nx - 900, nx - margin, **args)
+        ML = GFASourceMeasure(D, W, margin, ny - margin, margin, column_cut, **args)
+        MR = GFASourceMeasure(D, W, margin, ny - margin, nx - column_cut, nx - margin, **args)
         # Configure and run the source detection for each half.
-        args = dict(minsnr=minsnr, minsep=0.7 * stampsize / downsampling, maxsrc=maxsrc)
+        args = dict(minsnr=minsnr, minsep=0.7 * stampsize / downsampling, maxsrc=maxsrc,
+                    min_snr_ratio=min_snr_ratio)
         self.donuts = (
             desietcimg.util.detect_sources(SNR, measure=ML, **args),
             desietcimg.util.detect_sources(SNR, measure=MR, **args))
