@@ -359,8 +359,8 @@ class GFACamera(object):
             self.psf_stack = None
         return len(self.psfs)
 
-    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, minsnr=1.5, min_snr_ratio=0.1,
-                   maxsrc=19, column_cut=900, stack=True):
+    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, minsnr=1.5, min_snr_ratio=0.05,
+                   maxsrc=19, column_cut=920, stack=True):
         """Find donut candidates in each half of a specified exposure.
 
         For best results, estimate and subtract the dark current before calling this method.
