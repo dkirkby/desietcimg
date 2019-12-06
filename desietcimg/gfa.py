@@ -338,7 +338,7 @@ class GFACamera(object):
         else:
             raise ValueError('Invalid retval "{0}".'.format(retval))
 
-    def get_psfs(self, iexp=0, downsampling=2, margin=16, stampsize=45, minsnr=2.0, maxsrc=29):
+    def get_psfs(self, iexp=0, downsampling=2, margin=16, stampsize=45, minsnr=2.0, maxsrc=29, stack=True):
         """Find PSF candidates in a specified exposure.
 
         For best results, estimate and subtract the dark current before calling this method.
@@ -351,10 +351,13 @@ class GFACamera(object):
             stampsize=stampsize, downsampling=downsampling)
         self.psfs = desietcimg.util.detect_sources(
             SNR, measure=M, minsnr=minsnr, minsep=0.7 * stampsize / downsampling, maxsrc=maxsrc)
-        self.psf_stack = desietcimg.util.get_stacked(self.psfs)
+        if stack:
+            self.psf_stack = desietcimg.util.get_stacked(self.psfs)
+        else:
+            self.psf_stack = None
         return len(self.psfs)
 
-    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, minsnr=1.5, maxsrc=19):
+    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, minsnr=1.5, maxsrc=19, stack=True):
         """Find donut candidates in each half of a specified exposure.
 
         For best results, estimate and subtract the dark current before calling this method.
@@ -372,9 +375,12 @@ class GFACamera(object):
         self.donuts = (
             desietcimg.util.detect_sources(SNR, measure=ML, **args),
             desietcimg.util.detect_sources(SNR, measure=MR, **args))
-        self.donut_stack = (
-            desietcimg.util.get_stacked(self.donuts[0]),
-            desietcimg.util.get_stacked(self.donuts[1]))
+        if stack:
+            self.donut_stack = (
+                desietcimg.util.get_stacked(self.donuts[0]),
+                desietcimg.util.get_stacked(self.donuts[1]))
+        else:
+            self.donut_stack = None
         return len(self.donuts[0]), len(self.donuts[1])
 
     def find_sources(self, filename, outname):
