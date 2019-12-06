@@ -6,6 +6,7 @@ import scipy.signal
 import matplotlib.pyplot as plt
 import matplotlib.patches
 import matplotlib.colors
+import matplotlib.patheffects
 import matplotlib.cm
 
 import desietcimg.util
@@ -264,20 +265,30 @@ def plot_data(D, W, downsampling=4, zoom=1, label=None, colorhist=False, stamps=
     D, W = desietcimg.util.downsample_weighted(D, W, downsampling)
     # Preprocess the data for display.
     D = desietcimg.util.preprocess(D, W, **preprocess_args)
+    ny, nx = D.shape
     # Display the image.
     args = dict(imshow_args)
     if 'extent' not in args:
         # Use the input pixel space for the extent, without downsampling.
-        ny, nx = D.shape
         args['extent'] = [-0.5, nx * downsampling - 0.5, -0.5, ny * downsampling - 0.5]
     fig, ax = plot_pixels(D, zoom=zoom, label=label, colorhist=colorhist,
                           imshow_args=args, text_args=text_args, colorhist_args=colorhist_args)
-    for stamp in stamps:
+    outline = [
+        matplotlib.patheffects.Stroke(linewidth=1, foreground='k'),
+        matplotlib.patheffects.Normal()]
+    for k, stamp in enumerate(stamps):
         yslice, xslice = stamp[:2]
         xlo, xhi = xslice.start, xslice.stop
         ylo, yhi = yslice.start, yslice.stop
-        ax.add_artist(plt.Rectangle((xlo, ylo), xhi - xlo, yhi - ylo,
-                                    fc='none', ec='w', alpha=0.75))
+        rect = plt.Rectangle((xlo, ylo), xhi - xlo, yhi - ylo, fc='none', ec='w', lw=1)
+        ax.add_artist(rect)
+        if xhi < nx // 2:
+            xtext, halign = xhi, 'left'
+        else:
+            xtext, halign = xlo, 'right'
+        text = ax.text(
+            xtext, 0.5 * (ylo + yhi), str(k), fontsize=12, color='w', va='center', ha=halign)
+        text.set_path_effects(outline)
     return fig, ax
 
 
@@ -420,20 +431,24 @@ def plot_dark_calib(CA, gain=1.5, peaklines=True, lo=None, hi=None, ax=None):
     ax.legend(title='{0} @ {1:.0f}s'.format(CA.name, CA.dark_exptime))
 
 
-def plot_stack(stack, cmap='plasma_r', masked_color='cyan'):
+def plot_stack(stack, cmap='plasma_r', masked_color='cyan', offset=0):
     nstack = len(stack)
     cmap = matplotlib.cm.get_cmap(cmap)
     cmap.set_bad(color=masked_color)
     A = desietcimg.plot.Axes(nstack, size=2, pad=0.01)
-    for ax, (dist, D, W) in zip(A.axes[:nstack], stack):
+    outline = [
+        matplotlib.patheffects.Stroke(linewidth=1, foreground='k'),
+        matplotlib.patheffects.Normal()]
+    for k, (ax, (_, _, D, W)) in enumerate(zip(A.axes[:nstack], stack)):
         mu = np.sum(D * W) / np.sum(W)
         ivar = np.median(W[W > 0])
         z = np.arcsinh((D - mu) * (0.02 * np.sqrt(ivar)))
         vmin, vmax = np.percentile(z[W > 0], (1, 99))
         z[W == 0] = np.nan
         ax.imshow(z, interpolation='none', origin='lower', vmin=vmin, vmax=vmax, cmap=cmap)
-        ax.text(0.5, 0, f'{dist:.5f}', transform=ax.transAxes, fontsize=12, color='k',
-                verticalalignment='bottom', horizontalalignment='center')
+        text = ax.text(0.5, 0, str(k + offset), transform=ax.transAxes, fontsize=14,
+                       color='w', va='bottom', ha='center')
+        text.set_path_effects(outline)
 
 
 def plot_distance_matrix(stamps, cmap='magma', masked_color='cyan', dpi=100, maxsize=1024,
