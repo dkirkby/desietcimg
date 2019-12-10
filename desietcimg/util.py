@@ -785,3 +785,73 @@ def load_raw(files, *keys, hdu=0, slices=None):
     for key in meta:
         meta[key] = np.array(meta[key])
     return raw, meta
+
+
+class PSFMeasure(object):
+
+    def __init__(self, stamp_size, fiber_diam_um=107, pixel_size_um=15, plate_scales=(70., 76.),
+                 max_offset_pix=3.5, noffset=15, nangbins=25):
+        self.stamp_size = stamp_size
+        self.pixel_size_um = pixel_size_um
+        self.plate_scales = plate_scales
+        self.nangbins = nangbins
+        # Tabulate fiber templates for each (x,y) offset in the x >= 0 and y >= 0 quadrant.
+        self.offset_template = np.empty((noffset, noffset, stamp_size, stamp_size), np.float32)
+        max_rsq = (0.5 * fiber_diam_um / pixel_size_um) ** 2
+        profile = lambda x, y: 1.0 * (x ** 2 + y ** 2 < max_rsq)
+        delta = np.linspace(0, max_offset_pix, noffset)
+        for iy in range(noffset):
+            for ix in range(noffset):
+                self.offset_template[iy, ix] = make_template(
+                    stamp_size, profile, dx=delta[ix], dy=delta[iy], normalized=False)
+        self.xyoffset = np.linspace(-max_offset_pix, +max_offset_pix, 2 * noffset - 1)
+
+    def measure(self, P, W):
+        assert P.shape == W.shape == (self.stamp_size, self.stamp_size)
+        Psum = np.sum(P)
+        # Prepare the array of fiber fractions for offsets in all 4 quadrants.
+        nquad = len(self.offset_template)
+        nfull = 2 * nquad - 1
+        fiberfrac = np.zeros((nfull, nfull), np.float32)
+        # Loop over offsets in the x >= 0 and y >= 0 quadrant.
+        origin = nquad - 1
+        reverse = slice(None, None, -1)
+        for iy in range(nquad):
+            for ix in range(nquad):
+                T = self.offset_template[iy, ix]
+                fiberfrac[origin + iy, origin + ix] = np.sum(P * T) / Psum
+                if iy > 0:
+                    # Calculate in the x >= 0 and y < 0 quadrant.
+                    fiberfrac[origin - iy, origin + ix] = np.sum(P * T[reverse, :]) / Psum
+                if ix > 0:
+                    # Calculate in the x < 0 and y >= 0 quadrant.
+                    fiberfrac[origin + iy, origin - ix] = np.sum(P * T[:, reverse]) / Psum
+                if iy > 0 and ix > 0:
+                    # Calculate in the x < 0 and y < 0 quadrant.
+                    fiberfrac[origin - iy, origin - ix] = np.sum(P * T[reverse, reverse]) / Psum
+        # Locate the best centered offset.
+        iy, ix = np.unravel_index(np.argmax(fiberfrac), fiberfrac.shape)
+        xc = self.xyoffset[ix]
+        yc = self.xyoffset[iy]
+        # Calculate the radius of each pixel in arcsecs relative to this center.
+        dxy = np.arange(self.stamp_size) - 0.5 * (self.stamp_size - 1)
+        xgrid, ygrid = np.meshgrid(dxy, dxy, sparse=False)
+        radius = np.hypot((xgrid - xc) * self.pixel_size_um / self.plate_scales[0],
+                          (ygrid - yc) * self.pixel_size_um / self.plate_scales[1]).reshape(-1)
+        # Fill ivar-weighted histograms of flux versus angular radius.
+        rmax = dxy[-1] * self.pixel_size_um / max(self.plate_scales)
+        angbins = np.linspace(0., rmax, self.nangbins + 1)
+        WZ, _ = np.histogram(radius, bins=angbins, weights=(P * W).reshape(-1))
+        W, _ = np.histogram(radius, bins=angbins, weights=W.reshape(-1))
+        # Calculate the circularized profile, normalized to 1 at (xc, yc).
+        Z = np.divide(WZ, W, out=np.zeros_like(W), where=W > 0)
+        ##dZ = np.divide(1, np.sqrt(W), out=np.zeros_like(W), where=W > 0)
+        ##dZ /= Z[0]
+        Z /= Z[0]
+        # Find the first bin where Z <= 0.5.
+        k = np.argmax(Z <= 0.5)
+        # Use linear interpolation over this bin to estimate FWHM.
+        s = (0.5 - Z[k]) / (Z[k] - Z[k - 1])
+        rang = 0.5 * (angbins[1:] + angbins[:-1])
+        fwhm = 2 * ((1 - s) * rang[k] + s * rang[k + 1])
+        return fwhm, np.max(fiberfrac)

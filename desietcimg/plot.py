@@ -1,11 +1,14 @@
 """Plotting utilities. Import requires matplotlib.
 """
+import datetime
+
 import numpy as np
 import scipy.signal
 
 import matplotlib.pyplot as plt
 import matplotlib.patches
 import matplotlib.colors
+import matplotlib.lines
 import matplotlib.patheffects
 import matplotlib.cm
 
@@ -541,3 +544,146 @@ def plot_distance_matrix(stamps, cmap='magma', masked_color='cyan', dpi=100, max
     Dstack, Wstack = desietcimg.util.normalize_stamp(Dstack, Wstack)
     ax = create_axis(expand, nstamps - 2 * expand, expand)
     plot_stamp(Dstack, Wstack, ax, 'stack')
+
+
+def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=100, interpolation='none'):
+    # Calculate crops to use.
+    gsize, fsize = stacks['GUIDE0'].shape[1], stacks['FOCUS1L'].shape[1]
+    gcrop = gsize - size
+    fcrop = fsize - size
+    # Initialize PSF measurements.
+    M = desietcimg.util.PSFMeasure(gsize)
+    # Initialize the figure.
+    gz = (gsize - gcrop) * zoom
+    fz = (fsize - fcrop) * zoom
+    nguide, nfocus = 6, 4
+    width = nguide * gz + (nguide - 1) * pad
+    height = gz + 2 * (fz + pad)
+    fig = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi, frameon=False)
+    # Fill the background with white.
+    ax = plt.axes((0, 0, 1, 1))
+    ax.axis('off')
+    ax.imshow(np.ones((height, width, 3)))
+    # Calculate the fiber diameter in GFA pixels.
+    fiber_diam_um = 107
+    pixel_size_um = 15
+    #plate_scale_x, plate_scale_y = 70., 76. # microns / arcsec
+    fiber_diam_pix = fiber_diam_um / pixel_size_um
+    # Define helper functions.
+    def imshow(ax, D, W, name):
+        ax.axis('off')
+        d = D.copy()
+        d[W == 0] = np.nan
+        vmax = np.percentile(d, 99.5)
+        ax.imshow(d, interpolation=interpolation, origin='lower', cmap='magma', vmin=-0.05 * vmax, vmax=vmax)
+        ax.text(0, 0, name, transform=ax.transAxes, fontsize=10, color='c',
+                verticalalignment='bottom', horizontalalignment='left')
+        n = int(name[5])
+        angle = np.deg2rad(36 * (n - 2))
+        ny, nx = D.shape
+        assert ny == nx
+        xc, yc = 0.12 * ny, ny - 0.12 * ny
+        du = 0.02 * ny * np.cos(angle)
+        dv = 0.02 * ny * np.sin(angle)
+        #ax.add_line(matplotlib.lines.Line2D([xc + du, xc - 3 * du], [yc - dv, yc + 3 * dv], c='c', lw=1, ls='-'))
+        #ax.add_line(matplotlib.lines.Line2D([xc - dv, xc + dv], [yc - du, yc + du], c='c', lw=1, ls='-'))
+        xpt = np.array([-4 * du, dv, du, -dv, -4 * du])
+        ypt = np.array([4 * dv, du, -dv, -du, 4 * dv])
+        ax.add_line(matplotlib.lines.Line2D(xpt + xc, ypt + yc, c='c', lw=1, ls='-'))
+    # Plot GUIDEn PSFs along the middle row.
+    y = (fz + pad) / height
+    dy, dx = gz / height, gz / width
+    fwhm_vec, ffrac_vec = [], []
+    for k, n in enumerate((2, 0, 8, 7, 5, 3)):
+        x = (k * gz + (k - 1) * pad) / width
+        name = 'GUIDE{0}'.format(n)
+        if stacks[name].ndim == 3:
+            ax = plt.axes((x, y, dx, dy))
+            D, W = stacks[name]
+            # Find the best centered crop.
+            xy = np.arange(gsize)
+            Dsum = D.sum()
+            xc = np.sum(D * xy.reshape(1, -1)) / Dsum
+            yc = np.sum(D * xy.reshape(-1, 1)) / Dsum
+            csize = gsize - gcrop
+            xy0 = (csize - 1) / 2
+            ix, iy = int(np.round(xc - xy0)), int(np.round(yc - xy0))
+            S = slice(iy, iy + csize), slice(ix, ix + csize)
+            imshow(ax, D[S], W[S], name)
+            # Draw an outline of the fiber.
+            fiber = matplotlib.patches.Circle((xy0, xy0), 0.5 * fiber_diam_pix, color='c', ls='-', alpha=0.7, fill=False)
+            ax.add_artist(fiber)
+            # Calculate and display the PSF FWHM and fiberfrac.
+            fwhm, ffrac = M.measure(D, W)
+            fwhm_vec.append(fwhm)
+            ffrac_vec.append(ffrac)
+            #print(name, fwhm, ffrac)
+    # Plot FOCUSn PSFs along the top and bottom rows.
+    yL = 0
+    yR = (gz + 2 * pad + fz) / height
+    x0 = ((fz + pad) // 2) / width
+    dy, dx = fz / height, fz / width
+    for k, n in enumerate((1, 9, -1, 6, 4)):
+        x = (k * gz + (k - 1) * pad) / width + x0
+        if n < 0:
+            xc = x
+            continue
+        name = 'FOCUS{0}L'.format(n)
+        if stacks[name].ndim == 3:
+            ax = plt.axes((x, yL, dx, dy))
+            D, W = stacks[name][:, fcrop//2:fsize - fcrop//2, fcrop//2:fsize - fcrop//2]
+            imshow(ax, D, W, name)
+        name = 'FOCUS{0}R'.format(n)
+        if stacks[name].ndim == 3:
+            ax = plt.axes((x, yR, dx, dy))
+            D, W = stacks[name][:, fcrop//2:fsize - fcrop//2, fcrop//2:fsize - fcrop//2]
+            imshow(ax, D, W, name)
+
+    # Fill upper title region.
+    ax = plt.axes((xc, yR, dx, dy))
+    ax.axis('off')
+    ax.text(0.5, 0.8, str(meta['NIGHT']), transform=ax.transAxes, fontsize=16, color='k',
+            verticalalignment='bottom', horizontalalignment='center', fontweight='bold')
+    ax.text(0.5, 0.6, '{0:08d}'.format(meta['EXPID']), transform=ax.transAxes, fontsize=16, color='k',
+            verticalalignment='bottom', horizontalalignment='center', fontweight='bold')
+    if 'MJD-OBS' in meta:
+        localtime = datetime.datetime(2019, 1, 1) + datetime.timedelta(days=meta['MJD-OBS'] - 58484.0, hours=-7)
+        ax.text(0.5, 0.4, localtime.strftime('%H:%M:%S'), transform=ax.transAxes, fontsize=14, color='k',
+                verticalalignment='bottom', horizontalalignment='center')
+        ax.text(0.5, 0.3, 'local', transform=ax.transAxes, fontsize=10, color='gray',
+                verticalalignment='bottom', horizontalalignment='center')
+    if 'EXPTIME' in meta:
+        ax.text(0.5, 0.1, '{0:.1f}s'.format(meta['EXPTIME']), transform=ax.transAxes, fontsize=14, color='k',
+                verticalalignment='bottom', horizontalalignment='center')
+    # Add airmass/alt, az?
+
+    # Fill lower title region.
+    ax = plt.axes((xc, yL, dx, dy))
+    ax.axis('off')
+    ax.text(0.5, 0.8, 'FWHM'.format(np.nanmedian(fwhm_vec)), transform=ax.transAxes, fontsize=12, color='gray',
+            verticalalignment='bottom', horizontalalignment='center')
+    ax.text(0.5, 0.6, '{0:.2f}"'.format(np.median(fwhm_vec)), transform=ax.transAxes, fontsize=20, color='k',
+            verticalalignment='bottom', horizontalalignment='center', fontweight='bold')
+    ax.text(0.5, 0.3, 'FFRAC'.format(np.nanmedian(ffrac_vec)), transform=ax.transAxes, fontsize=12, color='gray',
+            verticalalignment='bottom', horizontalalignment='center')
+    ax.text(0.5, 0.1, '{0:.0f}%'.format(100 * np.median(ffrac_vec)), transform=ax.transAxes, fontsize=20, color='k',
+            verticalalignment='bottom', horizontalalignment='center', fontweight='bold')
+
+    # Fill corner regions.
+    xmirror = np.linspace(-0.8, 0.8, 15)
+    ymirror = 0.1 * xmirror ** 2 - 0.85
+    for k, y in enumerate((yL, yR)):
+        ax = plt.axes((0, y, x0, dy))
+        ax.axis('off')
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(-1, 1)
+        ax.plot([-0.6, 0.6], [0.8, -0.8], 'c:', lw=1)
+        ax.plot([-0.6, 0.6], [-0.8, 0.8], 'c:', lw=1)
+        if k == 0: # L = focus at z4 < 0 (closer to mirror)
+            ax.plot([0.3, 0.6], [-0.4, -0.8], 'c-', lw=1)
+            ax.plot([-0.6, -0.3], [-0.8, -0.4], 'c-', lw=1)
+        else: # R = focus at z4 > 0 (closer to sky)
+            ax.plot([-0.3, 0.6], [0.4, -0.8], 'c-', lw=1)
+            ax.plot([-0.6, 0.3], [-0.8, 0.4], 'c-', lw=1)
+        # Mirror
+        ax.plot(xmirror, ymirror, 'c-', lw=3)
