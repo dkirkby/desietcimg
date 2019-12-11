@@ -149,6 +149,9 @@ class GFACamera(object):
              GFACamera.master_dark, GFACamera.pixel_mask) = load_calib_data(calib_name)
         # We have no exposures loaded yet.
         self.nexp = 0
+        # We have no centering algorithms initialized yet.
+        self.psf_centering = None
+        self.donut_centering = None
 
     def setraw(self, raw, name=None, overscan_correction=True, subtract_master_zero=True, apply_gain=True):
         """Initialize using the raw GFA data provided, which can either be a single or multiple exposures.
@@ -359,18 +362,21 @@ class GFACamera(object):
             self.psf_stack = None
         return len(self.psfs)
 
-    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, minsnr=1.5, min_snr_ratio=0.05,
-                   maxsrc=19, column_cut=920, stack=True):
+    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, inset=5, minsnr=1.5,
+                   min_snr_ratio=0.05, maxsrc=19, column_cut=920, stack=True):
         """Find donut candidates in each half of a specified exposure.
 
         For best results, estimate and subtract the dark current before calling this method.
         """
+        if self.donut_centering is None or (
+            self.donut_centering.stamp_size != stampsize or self.donut_centering.inset != inset):
+            self.donut_centering = desietcimg.util.CenteredStamp(stampsize, inset, method='donut')
         D, W = self.data[iexp], self.ivar[iexp]
         ny, nx = D.shape
         # Compute a single SNR image to use for both halves.
         SNR = desietcimg.util.get_significance(D, W, downsampling=downsampling)
         # Configure the measurements for each half.
-        args = dict(stampsize=stampsize, downsampling=downsampling)
+        args = dict(stampsize=stampsize, downsampling=downsampling, centering=self.donut_centering)
         ML = GFASourceMeasure(D, W, margin, ny - margin, margin, column_cut, **args)
         MR = GFASourceMeasure(D, W, margin, ny - margin, nx - column_cut, nx - margin, **args)
         # Configure and run the source detection for each half.
@@ -423,7 +429,7 @@ class GFASourceMeasure(object):
     """Measure candidate sources in D[y1:y2, x1:x2]
     """
     def __init__(self, D, W, y1=0, y2=None, x1=0, x2=None, stampsize=45,
-                 downsampling=2, maxsaturated=3, saturation=1e5, bgmargin=4):
+                 downsampling=2, maxsaturated=3, saturation=1e5, bgmargin=4, centering=None):
         assert stampsize % 2 == 1
         self.rsize = stampsize // 2
         self.downsampling = downsampling
@@ -434,6 +440,7 @@ class GFASourceMeasure(object):
         ny, nx = self.D.shape
         self.y1, self.y2 = y1, y2 or ny
         self.x1, self.x2 = x1, x2 or nx
+        self.centering = centering
         '''
         # Initialize primary fitter.
         self.fitter = desietcimg.fit.GaussFitter(stampsize)
@@ -475,6 +482,9 @@ class GFASourceMeasure(object):
             if not result['success']:
                 return None
         '''
-        ##fig, ax = desietcimg.plot.plot_data(d, w, downsampling=1, zoom=4)
-        ##plt.show()
+        # Find the best centered inset stamp.
+        yinset, xinset = self.centering.center(d, w)
+        d, w = d[yinset, xinset], w[yinset, xinset]
+        yslice = slice(yslice.start + yinset.start, yslice.start + yinset.stop)
+        xslice = slice(xslice.start + xinset.start, xslice.start + xinset.stop)
         return (yslice, xslice, d, w)

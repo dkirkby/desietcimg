@@ -855,3 +855,45 @@ class PSFMeasure(object):
         rang = 0.5 * (angbins[1:] + angbins[:-1])
         fwhm = 2 * ((1 - s) * rang[k] + s * rang[k + 1])
         return fwhm, np.max(fiberfrac)
+
+
+class CenteredStamp(object):
+
+    def __init__(self, stamp_size, inset, method='fiber'):
+        self.inset = inset
+        self.stamp_size = stamp_size
+        self.inset_size = stamp_size - 2 * inset
+        # Calculate the range of offsets to explore.
+        self.dxy = np.arange(-inset, inset + 1)
+        noffset = len(self.dxy)
+        # Allocate memory for the templates to use.
+        self.template = np.zeros((noffset, noffset, stamp_size, stamp_size))
+        # Define the template profile.
+        rfibersq = (0.5 * 107 / 15) ** 2
+        if method == 'fiber':
+            profile = lambda x, y: 1.0 * (x ** 2 + y ** 2 < rfibersq)
+        elif method == 'donut':
+            xymax = 0.5 * (stamp_size - 2 * inset)
+            def profile(x, y):
+                rsq = x ** 2 + y ** 2
+                return rsq * np.exp(-0.5 * rsq / (3 * rfibersq)) * (np.maximum(np.abs(x), np.abs(y)) < xymax)
+        else:
+            raise ValueError('Unsupported method "{0}".'.format(method))
+        # Build the profiles.
+        for iy in range(noffset):
+            for ix in range(noffset):
+                self.template[iy, ix] = make_template(
+                    stamp_size, profile, dx=self.dxy[ix], dy=self.dxy[iy], normalized=True)
+
+    def center(self, D, W):
+        assert D.shape == (self.stamp_size, self.stamp_size) and W.shape == D.shape
+        S = slice(self.inset, self.inset + self.inset_size)
+        # Calculate the weighted mean template flux for each offset.
+        WDsum = np.sum(W * D * self.template, axis=(2, 3))
+        Wsum = np.sum(W * self.template, axis=(2, 3))
+        meanflux = np.divide(WDsum, Wsum, out=np.zeros(self.template.shape[:2]), where=Wsum > 0)
+        # Calculate the best-centered offset
+        iy, ix = np.unravel_index(np.argmax(meanflux.reshape(-1)), meanflux.shape)
+        yslice = slice(iy, iy + self.inset_size)
+        xslice = slice(ix, ix + self.inset_size)
+        return yslice, xslice
