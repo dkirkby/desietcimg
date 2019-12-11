@@ -342,7 +342,7 @@ def get_stamp_distance(D1, W1, D2, W2, maxdither=3, smoothing=1, fscale=np.linsp
             fscale[iscale], pull[iy, ix, iscale].copy())
 
 
-def get_stacked(stamps, smoothing=1, maxdither=3, maxdist=3, min_stack=3):
+def get_stacked(stamps, smoothing=1, maxdither=1, maxdist=3, min_stack=2):
     """Calculate a stack of detected sources ignoring outliers.
     """
     # Extract and normalize stamps.

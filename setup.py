@@ -17,6 +17,7 @@ setup(
             'simskycam=desietcimg.scripts.sky:simulate',
             'ciproc=desietcimg.scripts.guide:ciproc',
             'etccalib=desietcimg.scripts.calib:etccalib',
+            'gfadiq=desietcimg.scripts.gfa:gfadiq',
         ],
     }
 )
