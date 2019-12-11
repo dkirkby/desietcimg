@@ -341,18 +341,21 @@ class GFACamera(object):
         else:
             raise ValueError('Invalid retval "{0}".'.format(retval))
 
-    def get_psfs(self, iexp=0, downsampling=2, margin=16, stampsize=45, minsnr=2.0, min_snr_ratio=0.1,
+    def get_psfs(self, iexp=0, downsampling=2, margin=16, stampsize=45, inset=4, minsnr=2.0, min_snr_ratio=0.1,
                  maxsrc=29, stack=True):
         """Find PSF candidates in a specified exposure.
 
         For best results, estimate and subtract the dark current before calling this method.
         """
+        if self.psf_centering is None or (
+            self.psf_centering.stamp_size != stampsize or self.psf_centering.inset != inset):
+            self.psf_centering = desietcimg.util.CenteredStamp(stampsize, inset, method='fiber')
         D, W = self.data[iexp], self.ivar[iexp]
         ny, nx = D.shape
         SNR = desietcimg.util.get_significance(D, W, downsampling=downsampling)
         M = GFASourceMeasure(
             D, W, margin, ny - margin, margin, nx - margin,
-            stampsize=stampsize, downsampling=downsampling)
+            stampsize=stampsize, downsampling=downsampling, centering=self.psf_centering)
         self.psfs = desietcimg.util.detect_sources(
             SNR, measure=M, minsnr=minsnr, minsep=0.7 * stampsize / downsampling, maxsrc=maxsrc,
             min_snr_ratio=min_snr_ratio)
@@ -362,8 +365,8 @@ class GFACamera(object):
             self.psf_stack = None
         return len(self.psfs)
 
-    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, inset=5, minsnr=1.5,
-                   min_snr_ratio=0.05, maxsrc=19, column_cut=920, stack=True):
+    def get_donuts(self, iexp=0, downsampling=2, margin=16, stampsize=65, inset=8, minsnr=1.5,
+                   min_snr_ratio=0.1, maxsrc=19, column_cut=920, stack=True):
         """Find donut candidates in each half of a specified exposure.
 
         For best results, estimate and subtract the dark current before calling this method.
