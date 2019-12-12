@@ -687,3 +687,4 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=100, interpolat
             ax.plot([-0.6, 0.3], [-0.8, 0.4], 'c-', lw=1)
         # Mirror
         ax.plot(xmirror, ymirror, 'c-', lw=3)
+    return fig

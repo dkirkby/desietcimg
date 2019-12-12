@@ -13,6 +13,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+import fitsio
+
 from desietcimg.gfa import *
 from desietcimg.plot import *
 from desietcimg.util import *
@@ -36,9 +38,22 @@ def process(GFA, night, expid, args):
     # Prepare the output path.
     outpath = args.outpath / night / expid
     outpath.mkdir(parents=True, exist_ok=True)
-
+    # Process this exposure to produce a stack FITS file.
     logging.info('Processing {0}'.format(inpath))
-    GFA.process(inpath, outpath / 'stack_{0}.fits'.format(expid))
+    fitspath = outpath / 'stack_{0}.fits'.format(expid)
+    GFA.process(inpath, fitspath)
+    # Read the generated FITS file.
+    stacks = {}
+    with fitsio.FITS(str(fitspath)) as hdus:
+        header = hdus[0].read_header()
+        meta = {k: header[k] for k in ('NIGHT', 'EXPID', 'EXPTIME', 'MJD-OBS')}
+        for hdu in hdus[1:]:
+            stacks[hdu.get_extname()] = hdu.read().copy()
+    # Produce a summary plot.
+    fig = plot_image_quality(stacks, meta)
+    # Save the summary plot.
+    plt.savefig(str(outpath / 'gfadiq_{0}.png'.format(expid)))
+    plt.clf()
 
 
 def gfadiq():
