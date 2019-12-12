@@ -98,11 +98,15 @@ def gfadiq():
     if os.getenv('NERSC_HOST') is not None:
         host = 'NERSC'
         logging.info('Detected a NERSC host.')
+    elif os.getenv('DOS_HOME') is not None:
+        host = 'DOS'
 
     # Determine where the input raw data is located.
     if args.inpath is None:
         if host is 'NERSC':
             args.inpath = '/project/projectdirs/desi/spectro/data/'
+        elif host is 'DOS':
+            args.inpath = '/exposures/desi/'
         else:
             print('No input path specified with --inpath.')
             sys.exit(-1)
@@ -126,6 +130,9 @@ def gfadiq():
     if args.calibpath is None:
         if host is 'NERSC':
             args.calibpath = '/global/project/projectdirs/desi/cmx/gfa/calib/GFA_calib.fits'
+        elif host is 'DOS':
+            # Should use a more permanent path than this which is synched via svn.
+            args.calibpath = '/n/home/desiobserver/donut/GFA_calib.fits'
         else:
             print('No GFA calibration data path specified with --calibpath.')
             sys.exit(-1)
