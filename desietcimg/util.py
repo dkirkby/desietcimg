@@ -774,8 +774,8 @@ def load_raw(files, *keys, hdu=0, slices=None):
                 data = hdus[hdu][slices]
                 raw = np.empty((nexp,) + data.shape, data.dtype)
                 raw[0] = data
-                logging.info('Reading {0} files with shape {1} and dtype {2}.'
-                             .format(nexp, data.shape, data.dtype))
+                logging.debug('Reading {0} files with shape {1} and dtype {2}.'
+                              .format(nexp, data.shape, data.dtype))
             else:
                 raw[k] = hdus[hdu][slices]
             hdr = hdus[hdu].read_header()

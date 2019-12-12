@@ -31,7 +31,7 @@ def load_lab_data(filename='GFA_lab_data.csv'):
                 'FWELL': row['FWELL_Ke'],
                 'GAIN': row['GAIN_eADU'],
             }
-    logging.info('Loaded GFA lab data from {0}.'.format(path))
+    logging.info('Loaded GFA lab data from {0}'.format(path))
     return lab_data
 
 
@@ -110,7 +110,7 @@ def load_calib_data(name='GFA_calib.fits'):
             master_zero[gfa] = hdus['ZERO{0}'.format(gfanum)].read().copy()
             master_dark[gfa] = hdus['DARK{0}'.format(gfanum)].read().copy()
             pixel_mask[gfa] = hdus['MASK{0}'.format(gfanum)].read().astype(np.bool)
-    logging.info('Loaded GFA calib data from {0}.'.format(name))
+    logging.info('Loaded GFA calib data from {0}'.format(name))
     return data, master_zero, master_dark, pixel_mask
 
 
@@ -396,7 +396,9 @@ class GFACamera(object):
             self.donut_stack = None
         return len(self.donuts[0]), len(self.donuts[1])
 
-    def find_sources(self, filename, outname):
+    def process(self, filename, outname):
+        """Driver for processing all cameras in a single exposure and writing summary files.
+        """
         with fitsio.FITS(outname, 'rw', clobber=True) as hdus:
             header = None
             for gfa in self.gfa_names:
@@ -411,6 +413,7 @@ class GFACamera(object):
                 if header is None:
                     header = {k: meta[k][0] for k in meta if k != 'GCCDTEMP'}
                     hdus.write(np.zeros((1,), dtype=np.float32), header=header)
+                    logging.info('Exposure time is {0:.1f}s'.format(header['EXPTIME']))
                 try:
                     self.setraw(raw, name=gfa)
                     self.data -= self.get_dark_current(meta['GCCDTEMP'], meta['EXPTIME'], method='linear')
