@@ -396,7 +396,7 @@ class GFACamera(object):
             self.donut_stack = None
         return len(self.donuts[0]), len(self.donuts[1])
 
-    def process(self, filename, outname):
+    def process(self, filename, outname, callback=None):
         """Driver for processing all cameras in a single exposure and writing summary files.
         """
         with fitsio.FITS(outname, 'rw', clobber=True) as hdus:
@@ -429,6 +429,8 @@ class GFACamera(object):
                     for stack, side in zip(self.donut_stack, 'LR'):
                         if stack is not None:
                             hdus.write(np.stack(stack).astype(np.float32), extname=gfa+side)
+                if callback is not None:
+                    callback(self, meta)
 
 
 class GFASourceMeasure(object):

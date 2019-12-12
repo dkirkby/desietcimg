@@ -9,6 +9,8 @@ from pathlib import Path
 
 import numpy as np
 
+from PIL import Image # needed for jpg export
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -41,7 +43,16 @@ def process(GFA, night, expid, args):
     # Process this exposure to produce a stack FITS file.
     logging.info('Processing {0}'.format(inpath))
     fitspath = outpath / 'stack_{0}.fits'.format(expid)
-    GFA.process(inpath, fitspath)
+    if args.save_frames:
+        def callback(gfa, meta):
+            stamps = gfa.psfs if gfa.name.startswith('GUIDE') else gfa.donuts[0] + gfa.donuts[1]
+            label = '{0} {1} {2:.1f}s'.format(meta['NIGHT'][0], meta['EXPID'][0], meta['EXPTIME'][0])
+            plot_data(gfa.data[0], gfa.ivar[0], downsampling=2, label=label, stamps=stamps, colorhist=True)
+            plt.savefig(outpath / '{0}_{1:08d}.jpg'.format(gfa.name, meta['EXPID'][0]), quality=80)
+            plt.clf()
+    else:
+        callback = None
+    GFA.process(inpath, fitspath, callback=callback)
     # Read the generated FITS file.
     stacks = {}
     with fitsio.FITS(str(fitspath)) as hdus:
@@ -66,6 +77,8 @@ def gfadiq():
         help='Night of exposure to process in the format YYYYMMDD')
     parser.add_argument('--expid', type=int, metavar='N',
         help='Exposure sequence identifier to process')
+    parser.add_argument('--save-frames', action='store_true',
+        help='Save images of each GFA frame')
     parser.add_argument('--inpath', type=str, metavar='PATH',
         help='Path where raw data is organized under YYYYMMDD directories')
     parser.add_argument('--outpath', type=str, metavar='PATH',
