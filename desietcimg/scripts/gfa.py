@@ -9,7 +9,11 @@ from pathlib import Path
 
 import numpy as np
 
-from PIL import Image # needed for jpg export
+try:
+    from PIL import Image
+    img_format = 'jpg'
+except ImportError:
+    img_format = 'png'
 
 import matplotlib
 matplotlib.use('Agg')
@@ -48,7 +52,7 @@ def process(GFA, night, expid, args):
             stamps = gfa.psfs if gfa.name.startswith('GUIDE') else gfa.donuts[0] + gfa.donuts[1]
             label = '{0} {1} {2:.1f}s'.format(meta['NIGHT'][0], meta['EXPID'][0], meta['EXPTIME'][0])
             plot_data(gfa.data[0], gfa.ivar[0], downsampling=2, label=label, stamps=stamps, colorhist=True)
-            plt.savefig(outpath / '{0}_{1:08d}.jpg'.format(gfa.name, meta['EXPID'][0]), quality=80)
+            plt.savefig(outpath / '{0}_{1:08d}.{2}'.format(gfa.name, meta['EXPID'][0], img_format), quality=80)
             plt.clf()
     else:
         callback = None
