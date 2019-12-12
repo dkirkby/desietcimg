@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='desietcimg',
@@ -8,7 +8,7 @@ setup(
     author='David Kirkby',
     author_email='dkirkby@uci.edu',
     license='MIT',
-    packages=['desietcimg'],
+    packages=find_packages(exclude=["tests",]),
     install_requires=['numpy', 'scipy'],
     include_package_data=True, # specified in MANIFEST.in
     zip_safe=False,
