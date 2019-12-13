@@ -546,9 +546,17 @@ def plot_distance_matrix(stamps, cmap='magma', masked_color='cyan', dpi=100, max
     plot_stamp(Dstack, Wstack, ax, 'stack')
 
 
-def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=100, interpolation='none'):
-    # Calculate crops to use.
-    gsize, fsize = stacks['GUIDE0'].shape[1], stacks['FOCUS1L'].shape[1]
+def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolation='none'):
+    # Calculate crops to use, without assuming which cameras are present in stacks.
+    gsize, fsize = stacks['GUIDE0'][0].shape[0], stacks['FOCUS1'][0][0].shape[0]
+    guide = [k for k in stacks.keys() if k.startswith('GUIDE')]
+    gsize = len(stacks[guide[0]][0]) if guide else 0
+    focus = [k for k in stacks.keys() if k.startswith('FOCUS')]
+    if focus:
+        L, R = stacks[focus[0]]
+        fsize = len(L[0]) if L else len(R[0])
+    else:
+        fsize = 0
     gcrop = gsize - size
     fcrop = fsize - size
     # Initialize PSF measurements.
@@ -597,7 +605,7 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=100, interpolat
     for k, n in enumerate((2, 0, 8, 7, 5, 3)):
         x = (k * gz + (k - 1) * pad) / width
         name = 'GUIDE{0}'.format(n)
-        if stacks[name].ndim == 3:
+        if name in stacks:
             ax = plt.axes((x, y, dx, dy))
             D, W = stacks[name]
             # Find the best centered crop.
@@ -617,27 +625,28 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=100, interpolat
             fwhm, ffrac = M.measure(D, W)
             fwhm_vec.append(fwhm)
             ffrac_vec.append(ffrac)
-            #print(name, fwhm, ffrac)
     # Plot FOCUSn PSFs along the top and bottom rows.
     yL = 0
     yR = (gz + 2 * pad + fz) / height
     x0 = ((fz + pad) // 2) / width
     dy, dx = fz / height, fz / width
+    cropped = slice(fcrop // 2, fsize - fcrop // 2)
     for k, n in enumerate((1, 9, -1, 6, 4)):
         x = (k * gz + (k - 1) * pad) / width + x0
         if n < 0:
             xc = x
             continue
-        name = 'FOCUS{0}L'.format(n)
-        if stacks[name].ndim == 3:
-            ax = plt.axes((x, yL, dx, dy))
-            D, W = stacks[name][:, fcrop//2:fsize - fcrop//2, fcrop//2:fsize - fcrop//2]
-            imshow(ax, D, W, name)
-        name = 'FOCUS{0}R'.format(n)
-        if stacks[name].ndim == 3:
-            ax = plt.axes((x, yR, dx, dy))
-            D, W = stacks[name][:, fcrop//2:fsize - fcrop//2, fcrop//2:fsize - fcrop//2]
-            imshow(ax, D, W, name)
+        name = 'FOCUS{0}'.format(n)
+        if name in stacks:
+            L, R = stacks[name]
+            if L is not None:
+                D, W = L[0][cropped, cropped], L[1][cropped, cropped]
+                ax = plt.axes((x, yL, dx, dy))
+                imshow(ax, D, W, name)
+            if R is not None:
+                D, W = R[0][cropped, cropped], R[1][cropped, cropped]
+                ax = plt.axes((x, yR, dx, dy))
+                imshow(ax, D, W, name)
 
     # Fill upper title region.
     ax = plt.axes((xc, yR, dx, dy))

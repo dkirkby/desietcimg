@@ -25,8 +25,46 @@ from desietcimg.gfa import *
 from desietcimg.plot import *
 from desietcimg.util import *
 
+# Globals shared by process_one below.
+GFA = None
+raw = np.empty((1, 1032, 2248), np.uint32)
 
-def process(GFA, night, expid, args):
+
+def process_one(hdus, camera, framepath):
+    """Process a single camera of a single exposure.
+    """
+    hdr = hdus[camera].read_header()
+    meta = {}
+    for key in 'NIGHT', 'EXPID', 'MJD-OBS', 'EXPTIME', 'GCCDTEMP':
+        if key not in hdr:
+            logging.error('Missing required key {0} for {1}'.format(key, camera))
+            return None
+        meta[key] = hdr[key]
+    raw[0] = hdus[camera][:, :]
+    logging.info('Processing {0}'.format(camera))
+    try:
+        GFA.setraw(raw, name=camera)
+    except ValueError as e:
+        logging.error(e)
+        return None
+    GFA.data -= GFA.get_dark_current(meta['GCCDTEMP'], meta['EXPTIME'])
+    if camera.startswith('GUIDE'):
+        GFA.get_psfs()
+        stamps = GFA.psfs
+        result = GFA.psf_stack
+    else:
+        GFA.get_donuts()
+        stamps = GFA.donuts[0] + GFA.donuts[1]
+        result = GFA.donut_stack
+    if framepath is not None:
+        label = '{0} {1} {2:.1f}s'.format(meta['NIGHT'], meta['EXPID'], meta['EXPTIME'])
+        plot_data(GFA.data[0], GFA.ivar[0], downsampling=2, label=label, stamps=stamps, colorhist=True)
+        plt.savefig(framepath / '{0}_{1:08d}.{2}'.format(camera, meta['EXPID'], img_format), quality=80)
+        plt.clf()
+    return result, meta
+
+
+def process(night, expid, args):
     """Process a single exposure.
     """
     # Locate the exposure path.
@@ -44,28 +82,34 @@ def process(GFA, night, expid, args):
     # Prepare the output path.
     outpath = args.outpath / night / expid
     outpath.mkdir(parents=True, exist_ok=True)
-    # Process this exposure to produce a stack FITS file.
+    # Open the FITS file to read.
     logging.info('Processing {0}'.format(inpath))
+    hdus = fitsio.FITS(str(inpath), mode='r')
+    # Process each camera in the input.
+    results = {}
+    for camera in GFA.gfa_names:
+        if camera not in hdus:
+            logging.error('Missing HDU {0}'.format(camera))
+            continue
+        result, meta = process_one(hdus, camera, outpath if args.save_frames else None)
+        if result is None:
+            logging.error('Error processing HDU {0}'.format(camera))
+        else:
+            results[camera] = result
+    # Save the output FITS file.
     fitspath = outpath / 'stack_{0}.fits'.format(expid)
-    if args.save_frames:
-        def callback(gfa, meta):
-            stamps = gfa.psfs if gfa.name.startswith('GUIDE') else gfa.donuts[0] + gfa.donuts[1]
-            label = '{0} {1} {2:.1f}s'.format(meta['NIGHT'][0], meta['EXPID'][0], meta['EXPTIME'][0])
-            plot_data(gfa.data[0], gfa.ivar[0], downsampling=2, label=label, stamps=stamps, colorhist=True)
-            plt.savefig(outpath / '{0}_{1:08d}.{2}'.format(gfa.name, meta['EXPID'][0], img_format), quality=80)
-            plt.clf()
-    else:
-        callback = None
-    GFA.process(inpath, fitspath, callback=callback)
-    # Read the generated FITS file.
-    stacks = {}
-    with fitsio.FITS(str(fitspath)) as hdus:
-        header = hdus[0].read_header()
-        meta = {k: header[k] for k in ('NIGHT', 'EXPID', 'EXPTIME', 'MJD-OBS')}
-        for hdu in hdus[1:]:
-            stacks[hdu.get_extname()] = hdu.read().copy()
+    with fitsio.FITS(str(fitspath), 'rw', clobber=True) as hdus:
+        for camera in results:
+            if camera.startswith('GUIDE'):
+                hdus.write(np.stack(results[camera]).astype(np.float32), extname=camera)
+            else:
+                L, R = results[camera]
+                if L is not None:
+                    hdus.write(np.stack(L).astype(np.float32), extname=camera + 'L')
+                if R is not None:
+                    hdus.write(np.stack(R).astype(np.float32), extname=camera + 'R')
     # Produce a summary plot.
-    fig = plot_image_quality(stacks, meta)
+    fig = plot_image_quality(results, meta)
     # Save the summary plot.
     plt.savefig(str(outpath / 'gfadiq_{0}.png'.format(expid)))
     plt.clf()
@@ -146,10 +190,11 @@ def gfadiq():
         sys.exit(-2)
 
     # Initialize the GFA analysis object.
+    global GFA
     GFA = GFACamera(calib_name=args.calibpath)
 
     if args.night is None or args.expid is None:
         print('Must specify night and expid for now.')
         sys.exit(-1)
 
-    process(GFA, args.night, args.expid, args)
+    process(args.night, args.expid, args)
