@@ -4,6 +4,7 @@ import os
 import sys
 import argparse
 import warnings
+import glob
 import multiprocessing
 
 from pathlib import Path
@@ -88,6 +89,11 @@ def process(night, expid, args, pool, pool_timeout=5):
     # Prepare the output path.
     outpath = args.outpath / night / expid
     outpath.mkdir(parents=True, exist_ok=True)
+    # Are there already existing outputs?
+    fitspath = outpath / 'stack_{0}.fits'.format(expid)
+    if fitspath.exists() and not args.overwrite:
+        logging.info('Will not overwrite outputs in {0}'.format(outpath))
+        return
     # Open the FITS file to read.
     logging.info('Processing {0}'.format(inpath))
     # Process each camera in the input.
@@ -115,7 +121,6 @@ def process(night, expid, args, pool, pool_timeout=5):
                 logging.error('Timeout waiting for {0} pool result'.format(camera))
                 del results[camera]
     # Save the output FITS file.
-    fitspath = outpath / 'stack_{0}.fits'.format(expid)
     with fitsio.FITS(str(fitspath), 'rw', clobber=True) as hdus:
         for camera in results:
             if camera.startswith('GUIDE'):
@@ -143,8 +148,14 @@ def gfadiq():
         help='Night of exposure to process in the format YYYYMMDD')
     parser.add_argument('--expid', type=int, metavar='N',
         help='Exposure sequence identifier to process')
+    parser.add_argument('--batch', action='store_true',
+        help='Process all existing exposures on night')
+    parser.add_argument('--watch', action='store_true',
+        help='Wait for and process new exposures on night')
     parser.add_argument('--save-frames', action='store_true',
         help='Save images of each GFA frame')
+    parser.add_argument('--overwrite', action='store_true',
+        help='Overwrite existing outputs')
     parser.add_argument('--inpath', type=str, metavar='PATH',
         help='Path where raw data is organized under YYYYMMDD directories')
     parser.add_argument('--outpath', type=str, metavar='PATH',
@@ -183,6 +194,13 @@ def gfadiq():
         print('Non-existant input path: {0}'.format(args.inpath))
         sys.exit(-2)
     logging.info('Input path is {0}'.format(args.inpath))
+
+    if args.night is None:
+        print('Missing required argument: night.')
+        sys.exit(-1)
+    nightpath = args.inpath / str(args.night)
+    if not nightpath.exists():
+        print('Non-existant directory for night: {0}'.format(nightpath))
 
     # Determine where the outputs will go.
     if args.outpath is None:
@@ -224,8 +242,14 @@ def gfadiq():
     else:
         pool = None
 
-    if args.night is None or args.expid is None:
-        print('Must specify night and expid for now.')
-        sys.exit(-1)
+    if args.expid is not None:
+        process(args.night, args.expid, args, pool)
+        return
 
-    process(args.night, args.expid, args, pool)
+    if args.batch or args.watch:
+        current_exposures = lambda: set((int(str(path)[-8:]) for path in nightpath.glob('????????')))
+        # Find the existing exposures on this night.
+        existing = current_exposures()
+        if args.batch:
+            for expid in existing:
+                process(args.night, expid, args, pool)
