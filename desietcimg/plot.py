@@ -602,22 +602,15 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
     y = (fz + pad) / height
     dy, dx = gz / height, gz / width
     fwhm_vec, ffrac_vec = [], []
+    cropped = slice(gcrop // 2, gsize - gcrop // 2)
     for k, n in enumerate((2, 0, 8, 7, 5, 3)):
         x = (k * gz + (k - 1) * pad) / width
         name = 'GUIDE{0}'.format(n)
         if name in stacks:
             ax = plt.axes((x, y, dx, dy))
             D, W = stacks[name]
-            # Find the best centered crop.
-            xy = np.arange(gsize)
-            Dsum = D.sum()
-            xc = np.sum(D * xy.reshape(1, -1)) / Dsum
-            yc = np.sum(D * xy.reshape(-1, 1)) / Dsum
-            csize = gsize - gcrop
-            xy0 = (csize - 1) / 2
-            ix, iy = int(np.round(xc - xy0)), int(np.round(yc - xy0))
-            S = slice(iy, iy + csize), slice(ix, ix + csize)
-            imshow(ax, D[S], W[S], name)
+            xy0 = (gsize - gcrop - 1) / 2
+            imshow(ax, D[cropped, cropped], W[cropped, cropped], name)
             # Draw an outline of the fiber.
             fiber = matplotlib.patches.Circle((xy0, xy0), 0.5 * fiber_diam_pix, color='c', ls='-', alpha=0.7, fill=False)
             ax.add_artist(fiber)
