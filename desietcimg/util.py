@@ -845,15 +845,16 @@ class PSFMeasure(object):
         W, _ = np.histogram(radius, bins=angbins, weights=W.reshape(-1))
         # Calculate the circularized profile, normalized to 1 at (xc, yc).
         Z = np.divide(WZ, W, out=np.zeros_like(W), where=W > 0)
-        ##dZ = np.divide(1, np.sqrt(W), out=np.zeros_like(W), where=W > 0)
-        ##dZ /= Z[0]
-        Z /= Z[0]
-        # Find the first bin where Z <= 0.5.
-        k = np.argmax(Z <= 0.5)
-        # Use linear interpolation over this bin to estimate FWHM.
-        s = (0.5 - Z[k]) / (Z[k] - Z[k - 1])
-        rang = 0.5 * (angbins[1:] + angbins[:-1])
-        fwhm = 2 * ((1 - s) * rang[k] + s * rang[k + 1])
+        if Z[0] > 0:
+            Z /= Z[0]
+            # Find the first bin where Z <= 0.5.
+            k = np.argmax(Z <= 0.5)
+            # Use linear interpolation over this bin to estimate FWHM.
+            s = (0.5 - Z[k]) / (Z[k] - Z[k - 1])
+            rang = 0.5 * (angbins[1:] + angbins[:-1])
+            fwhm = 2 * ((1 - s) * rang[k] + s * rang[k + 1])
+        else:
+            fwhm = -1
         return fwhm, np.max(fiberfrac)
 
 
