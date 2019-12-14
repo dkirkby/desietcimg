@@ -146,8 +146,8 @@ def gfadiq():
         help='provide verbose output on progress')
     parser.add_argument('--night', type=int, metavar='YYYYMMDD',
         help='Night of exposure to process in the format YYYYMMDD')
-    parser.add_argument('--expid', type=int, metavar='N',
-        help='Exposure sequence identifier to process')
+    parser.add_argument('--expid', type=str, metavar='N',
+        help='Exposure(s) to process specified as N or N1-N2')
     parser.add_argument('--batch', action='store_true',
         help='Process all existing exposures on night')
     parser.add_argument('--watch', action='store_true',
@@ -243,7 +243,17 @@ def gfadiq():
         pool = None
 
     if args.expid is not None:
-        process(args.night, args.expid, args, pool)
+        # Process an argument of the form N or N1-N2.
+        limits = [int(expid) for expid in args.expid.split('-')]
+        if len(limits) == 1:
+            start, stop = limits[0], limits[0] + 1
+        elif len(limits) == 2:
+            start, stop = limits[0], limits[1] + 1
+        else:
+            print('Invalid --expid (should be N or N1-N2): "{0}"'.format(args.expid))
+            sys.exit(-1)
+        for expid in range(start, stop):
+            process(args.night, expid, args, pool)
         return
 
     if args.batch or args.watch:
