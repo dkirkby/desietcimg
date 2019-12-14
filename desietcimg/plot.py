@@ -58,7 +58,7 @@ class Axes(object):
         assert rows * cols >= n
         width = cols * size + (cols - 1) * pad
         height = rows * size + (rows - 1) * pad
-        self.fig, axes = plt.subplots(rows, cols, figsize=(width, height))
+        self.fig, axes = plt.subplots(rows, cols, figsize=(width, height), squeeze=False)
         plt.subplots_adjust(left=0, right=1, bottom=0, top=1, wspace=pad, hspace=pad)
         self.axes = axes.flatten()
         self.n = n
@@ -308,7 +308,6 @@ def plot_full_frame(D, W=None, saturation=None, downsampling=8, clip_pct=0.5, dp
     # Any explicit limit overrides the clipped default.
     vmin = vmin or clip_vmin
     vmax = vmax or clip_vmax
-    print('clip', clip_vmin, clip_vmax, vmin, vmax)
     if vmin >= vmax:
         raise ValueError('Invalid limits: vmin >= vmax.')
     if compress:
@@ -582,7 +581,7 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
         ax.axis('off')
         d = D.copy()
         d[W == 0] = np.nan
-        vmax = np.percentile(d, 99.5)
+        vmax = np.nanpercentile(d, 99.5)
         ax.imshow(d, interpolation=interpolation, origin='lower', cmap='magma', vmin=-0.05 * vmax, vmax=vmax)
         ax.text(0, 0, name, transform=ax.transAxes, fontsize=10, color='c',
                 verticalalignment='bottom', horizontalalignment='left')
@@ -616,8 +615,8 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
             ax.add_artist(fiber)
             # Calculate and display the PSF FWHM and fiberfrac.
             fwhm, ffrac = M.measure(D, W)
-            fwhm_vec.append(fwhm)
-            ffrac_vec.append(ffrac)
+            fwhm_vec.append(fwhm if fwhm > 0 else np.nan)
+            ffrac_vec.append(ffrac if ffrac > 0 else np.nan)
     # Plot FOCUSn PSFs along the top and bottom rows.
     yL = 0
     yR = (gz + 2 * pad + fz) / height
@@ -635,11 +634,11 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
             if L is not None:
                 D, W = L[0][cropped, cropped], L[1][cropped, cropped]
                 ax = plt.axes((x, yL, dx, dy))
-                imshow(ax, D, W, name)
+                imshow(ax, D, W, name + 'L')
             if R is not None:
                 D, W = R[0][cropped, cropped], R[1][cropped, cropped]
                 ax = plt.axes((x, yR, dx, dy))
-                imshow(ax, D, W, name)
+                imshow(ax, D, W, name + 'R')
 
     # Fill upper title region.
     ax = plt.axes((xc, yR, dx, dy))
@@ -662,13 +661,13 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
     # Fill lower title region.
     ax = plt.axes((xc, yL, dx, dy))
     ax.axis('off')
-    ax.text(0.5, 0.8, 'FWHM'.format(np.nanmedian(fwhm_vec)), transform=ax.transAxes, fontsize=12, color='gray',
+    ax.text(0.5, 0.8, 'FWHM', transform=ax.transAxes, fontsize=12, color='gray',
             verticalalignment='bottom', horizontalalignment='center')
-    ax.text(0.5, 0.6, '{0:.2f}"'.format(np.median(fwhm_vec)), transform=ax.transAxes, fontsize=20, color='k',
+    ax.text(0.5, 0.6, '{0:.2f}"'.format(np.nanmedian(fwhm_vec)), transform=ax.transAxes, fontsize=20, color='k',
             verticalalignment='bottom', horizontalalignment='center', fontweight='bold')
-    ax.text(0.5, 0.3, 'FFRAC'.format(np.nanmedian(ffrac_vec)), transform=ax.transAxes, fontsize=12, color='gray',
+    ax.text(0.5, 0.3, 'FFRAC', transform=ax.transAxes, fontsize=12, color='gray',
             verticalalignment='bottom', horizontalalignment='center')
-    ax.text(0.5, 0.1, '{0:.0f}%'.format(100 * np.median(ffrac_vec)), transform=ax.transAxes, fontsize=20, color='k',
+    ax.text(0.5, 0.1, '{0:.0f}%'.format(100 * np.nanmedian(ffrac_vec)), transform=ax.transAxes, fontsize=20, color='k',
             verticalalignment='bottom', horizontalalignment='center', fontweight='bold')
 
     # Fill corner regions.
