@@ -253,7 +253,11 @@ def plot_pixels(D, label=None, colorhist=False, zoom=1, masked_color='cyan',
         for name, default in dict(color='w', fontsize=18).items():
             if name not in args:
                 args[name] = default
-        ax.text(0.01, 0.01 * nx / ny, label, transform=ax.transAxes, **args)
+        outline = [
+            matplotlib.patheffects.Stroke(linewidth=1, foreground='k'),
+            matplotlib.patheffects.Normal()]
+        text = ax.text(0.01, 0.01 * nx / ny, label, transform=ax.transAxes, **args)
+        text.set_path_effects(outline)
     if colorhist:
         axcb = plt.axes((0, zoom * ny / height, 1, colorhist_height / height))
         plot_colorhist(D, axcb, I, **colorhist_args)
