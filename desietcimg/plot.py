@@ -567,7 +567,6 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
         gsize = size
     if gsize == 0:
         fsize = size
-    print('sizes', gsize, fsize)
     gcrop = gsize - size
     fcrop = fsize - size
     # Initialize PSF measurements.
@@ -618,17 +617,18 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
         x = (k * gz + (k - 1) * pad) / width
         name = 'GUIDE{0}'.format(n)
         if name in stacks:
-            ax = plt.axes((x, y, dx, dy))
             D, W = stacks[name]
-            xy0 = (gsize - gcrop - 1) / 2
-            imshow(ax, D[cropped, cropped], W[cropped, cropped], name)
-            # Draw an outline of the fiber.
-            fiber = matplotlib.patches.Circle((xy0, xy0), 0.5 * fiber_diam_pix, color='c', ls='-', alpha=0.7, fill=False)
-            ax.add_artist(fiber)
-            # Calculate and display the PSF FWHM and fiberfrac.
-            fwhm, ffrac = M.measure(D, W)
-            fwhm_vec.append(fwhm if fwhm > 0 else np.nan)
-            ffrac_vec.append(ffrac if ffrac > 0 else np.nan)
+            if D is not None:
+                ax = plt.axes((x, y, dx, dy))
+                xy0 = (gsize - gcrop - 1) / 2
+                imshow(ax, D[cropped, cropped], W[cropped, cropped], name)
+                # Draw an outline of the fiber.
+                fiber = matplotlib.patches.Circle((xy0, xy0), 0.5 * fiber_diam_pix, color='c', ls='-', alpha=0.7, fill=False)
+                ax.add_artist(fiber)
+                # Calculate and display the PSF FWHM and fiberfrac.
+                fwhm, ffrac = M.measure(D, W)
+                fwhm_vec.append(fwhm if fwhm > 0 else np.nan)
+                ffrac_vec.append(ffrac if ffrac > 0 else np.nan)
     # Plot FOCUSn PSFs along the top and bottom rows.
     yL = 0
     yR = (gz + 2 * pad + fz) / height
