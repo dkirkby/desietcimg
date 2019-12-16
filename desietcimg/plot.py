@@ -556,7 +556,7 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
     focus = [k for k in stacks.keys() if k.startswith('FOCUS')]
     if focus:
         L, R = stacks[focus[0]]
-        fsize = len(L[0]) if L else len(R[0])
+        fsize = len(L[0]) if L[0] else len(R[0])
     else:
         fsize = 0
     gcrop = gsize - size
