@@ -68,7 +68,7 @@ def process_one(inpath, camera, framepath):
             plot_data(GFA.data[0], GFA.ivar[0], downsampling=2, label=label, stamps=stamps, colorhist=True)
             plt.savefig(framepath / '{0}_{1:08d}.{2}'.format(camera, meta['EXPID'], img_format), quality=80)
             plt.clf()
-        return result, meta
+        return result
 
 
 def process(night, expid, args, pool, pool_timeout=5):
@@ -84,7 +84,12 @@ def process(night, expid, args, pool, pool_timeout=5):
     # Look for a GFA SCIENCE exposure.
     inpath = inpath / 'gfa-{0}.fits.fz'.format(expid)
     if not inpath.exists():
-        logging.error('Non-existant file: {0}'.format(inpath))
+        logging.info('Skipping exposure with no GFA science data: {0}'.format(inpath))
+        return
+    # Read the header.
+    hdr = fitsio.read_header(str(inpath), ext=1)
+    if 'EXPTIME' not in hdr or not (hdr['EXPTIME'] > 0):
+        logging.info('Skipping GFA zero: {0}'.format(inpath))
         return
     # Prepare the output path.
     outpath = args.outpath / night / expid
@@ -105,7 +110,7 @@ def process(night, expid, args, pool, pool_timeout=5):
             if result is None:
                 logging.error('Error processing HDU {0}'.format(camera))
             else:
-                results[camera], meta = result
+                results[camera] = result
         else:
             results[camera] = pool.apply_async(process_one, (inpath, camera, framepath))
     if pool:
@@ -114,14 +119,16 @@ def process(night, expid, args, pool, pool_timeout=5):
             try:
                 result = results[camera].get(timeout=pool_timeout)
                 if result is None:
-                    logging.error('Error processing HDU {0}'.format(camera))
+                    logging.error('Error pool processing HDU {0}'.format(camera))
                 else:
-                    results[camera], meta = result
+                    results[camera] = result
             except TimeoutError:
                 logging.error('Timeout waiting for {0} pool result'.format(camera))
                 del results[camera]
     # Save the output FITS file.
     with fitsio.FITS(str(fitspath), 'rw', clobber=True) as hdus:
+        meta = {k: hdr.get(k) for k in ('NIGHT', 'EXPID', 'EXPTIME', 'HEXPOS', 'TRUSTEMP', 'ADC1PHI', 'ADC2PHI')}
+        hdus.write(np.zeros(1), header=meta)
         for camera in results:
             if camera.startswith('GUIDE'):
                 hdus.write(np.stack(results[camera]).astype(np.float32), extname=camera)
@@ -134,8 +141,10 @@ def process(night, expid, args, pool, pool_timeout=5):
     # Produce a summary plot.
     fig = plot_image_quality(results, meta)
     # Save the summary plot.
-    plt.savefig(str(outpath / 'gfadiq_{0}.png'.format(expid)))
+    figpath = outpath / 'gfadiq_{0}.png'.format(expid)
+    plt.savefig(figpath)
     plt.clf()
+    logging.info('Wrote {0}'.format(figpath))
 
 
 def gfadiq():
