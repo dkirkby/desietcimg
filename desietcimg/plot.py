@@ -554,9 +554,11 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
     guide = [k for k in stacks.keys() if k.startswith('GUIDE')]
     gsize = len(stacks[guide[0]][0]) if guide else 0
     focus = [k for k in stacks.keys() if k.startswith('FOCUS')]
-    if focus:
+    if focus is not None:
         L, R = stacks[focus[0]]
-        fsize = len(L[0]) if L[0] is not None else len(R[0])
+        print('L', L)
+        print('R', R)
+        fsize = len(L[0]) if (L[0] is not None) else len(R[0])
     else:
         fsize = 0
     gcrop = gsize - size
