@@ -635,6 +635,7 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
         if name in stacks:
             L, R = stacks[name]
             if L is not None:
+                print(L)
                 D, W = L[0][cropped, cropped], L[1][cropped, cropped]
                 ax = plt.axes((x, yL, dx, dy))
                 imshow(ax, D, W, name + 'L')
