@@ -396,42 +396,6 @@ class GFACamera(object):
             self.donut_stack = None
         return len(self.donuts[0]), len(self.donuts[1])
 
-    def process(self, filename, outname, callback=None):
-        """Driver for processing all cameras in a single exposure and writing summary files.
-        """
-        with fitsio.FITS(outname, 'rw', clobber=True) as hdus:
-            header = None
-            for gfa in self.gfa_names:
-                try:
-                    raw, meta = desietcimg.util.load_raw([str(filename)], 'NIGHT', 'EXPID', 'MJD-OBS', 'EXPTIME', 'GCCDTEMP', hdu=gfa)
-                except OSError as e:
-                    logging.error('Unable to read hdu {0} from {1}'.format(gfa, filename))
-                    return
-                if not meta['NIGHT'] or not meta['EXPID'] or not meta['EXPTIME'] or not meta['GCCDTEMP']:
-                    logging.error('Missing required metadata for {0} in {1}'.format(gfa, filename))
-                    return
-                if header is None:
-                    header = {k: meta[k][0] for k in meta if k != 'GCCDTEMP'}
-                    hdus.write(np.zeros((1,), dtype=np.float32), header=header)
-                    logging.info('Exposure time is {0:.1f}s'.format(header['EXPTIME']))
-                try:
-                    self.setraw(raw, name=gfa)
-                    self.data -= self.get_dark_current(meta['GCCDTEMP'], meta['EXPTIME'], method='linear')
-                except ValueError as e:
-                    logging.error(e)
-                    return
-                if gfa.startswith('GUIDE'):
-                    self.get_psfs()
-                    if self.psf_stack is not None:
-                        hdus.write(np.stack(self.psf_stack).astype(np.float32), extname=gfa)
-                else:
-                    self.get_donuts()
-                    for stack, side in zip(self.donut_stack, 'LR'):
-                        if stack is not None:
-                            hdus.write(np.stack(stack).astype(np.float32), extname=gfa+side)
-                if callback is not None:
-                    callback(self, meta)
-
 
 class GFASourceMeasure(object):
     """Measure candidate sources in D[y1:y2, x1:x2]
