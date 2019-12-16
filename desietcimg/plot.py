@@ -556,8 +556,6 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
     focus = [k for k in stacks.keys() if k.startswith('FOCUS')]
     if focus:
         L, R = stacks[focus[0]]
-        print('L', L)
-        print('R', R)
         fsize = len(L[0]) if L is not None else len(R[0])
     else:
         fsize = 0
@@ -636,11 +634,11 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
         name = 'FOCUS{0}'.format(n)
         if name in stacks:
             L, R = stacks[name]
-            if L is not None:
+            if L[0] is not None:
                 D, W = L[0][cropped, cropped], L[1][cropped, cropped]
                 ax = plt.axes((x, yL, dx, dy))
                 imshow(ax, D, W, name + 'L')
-            if R is not None:
+            if R[0] is not None:
                 D, W = R[0][cropped, cropped], R[1][cropped, cropped]
                 ax = plt.axes((x, yR, dx, dy))
                 imshow(ax, D, W, name + 'R')
