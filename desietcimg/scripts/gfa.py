@@ -2,6 +2,7 @@
 """
 import os
 import sys
+import time
 import argparse
 import warnings
 import glob
@@ -127,7 +128,8 @@ def process(night, expid, args, pool, pool_timeout=5):
                 del results[camera]
     # Save the output FITS file.
     with fitsio.FITS(str(fitspath), 'rw', clobber=True) as hdus:
-        meta = {k: hdr.get(k) for k in ('NIGHT', 'EXPID', 'EXPTIME', 'HEXPOS', 'TRUSTEMP', 'ADC1PHI', 'ADC2PHI')}
+        meta = {k: hdr.get(k) for k in (
+            'NIGHT', 'EXPID', 'MJD-OBS', 'EXPTIME', 'HEXPOS', 'TRUSTEMP', 'ADC1PHI', 'ADC2PHI')}
         hdus.write(np.zeros(1), header=meta)
         for camera in results:
             if camera.startswith('GUIDE'):
@@ -161,6 +163,8 @@ def gfadiq():
         help='Process all existing exposures on night')
     parser.add_argument('--watch', action='store_true',
         help='Wait for and process new exposures on night')
+    parser.add_argument('--watch-interval', type=float, metavar='T', default=5,
+        help='Interval in seconds to check for new exposures with --watch')
     parser.add_argument('--save-frames', action='store_true',
         help='Save images of each GFA frame')
     parser.add_argument('--overwrite', action='store_true',
@@ -272,3 +276,15 @@ def gfadiq():
         if args.batch:
             for expid in existing:
                 process(args.night, expid, args, pool)
+        if args.watch:
+            logging.info('Watching for new exposures...hit ^C to exit')
+            try:
+                while True:
+                    time.sleep(args.watch_interval)
+                    newexp = current_exposures() - existing
+                    for expid in newexp:
+                        process(args.night, expid, args, pool)
+                    existing |= newexp
+            except KeyboardInterrupt:
+                logging.info('Bye.')
+                pass
