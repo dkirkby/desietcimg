@@ -898,3 +898,23 @@ class CenteredStamp(object):
         yslice = slice(iy, iy + self.inset_size)
         xslice = slice(ix, ix + self.inset_size)
         return yslice, xslice
+
+
+def uncompress(filein, pathout=None, overwrite=True):
+    """Uncompress a tile-compressed FITS file with an .fz extension.
+    """
+    filein = pathlib.Path(filein)
+    if filein.suffix != '.fz':
+        return
+    if pathout is not None:
+        pathout = filein.parent
+    fileout = (pathout or filein.parent) / filein.stem
+    if fileout.exists() and not overwrite:
+        raise RuntimeError('Output exists and overwrite is False: {0}'.format(fileout))
+    with fitsio.FITS(str(filein), mode='r') as IN:
+        with fitsio.FITS(str(fileout), mode='rw', clobber=overwrite) as OUT:
+            for hdu in IN:
+                header = hdu.read_header()
+                data = hdu.read()
+                OUT.write(data, header=header, extname=hdu.get_extname())
+    return str(fileout)
