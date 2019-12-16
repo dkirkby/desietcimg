@@ -554,7 +554,8 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
     gsize, fsize = 0, 0
     for name, stack in stacks.items():
         if name.startswith('GUIDE'):
-            gsize = len(stack[0])
+            if stack[0] is not None:
+                gsize = len(stack[0])
         else:
             L, R = stack
             if L[0] is not None:
