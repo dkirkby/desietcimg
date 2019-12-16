@@ -551,16 +551,23 @@ def plot_distance_matrix(stamps, cmap='magma', masked_color='cyan', dpi=100, max
 
 def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolation='none'):
     # Calculate crops to use, without assuming which cameras are present in stacks.
-    guide = [k for k in stacks.keys() if k.startswith('GUIDE')]
-    gsize = len(stacks[guide[0]][0]) if guide else 0
-    focus = [k for k in stacks.keys() if k.startswith('FOCUS')]
-    if focus is not None:
-        L, R = stacks[focus[0]]
-        print('L', L)
-        print('R', R)
-        fsize = len(L[0]) if (L[0] is not None) else len(R[0])
-    else:
-        fsize = 0
+    gsize, fsize = 0, 0
+    for name, stack in stacks.items():
+        if name.startswith('GUIDE'):
+            gsize = len(stack[0])
+        else:
+            L, R = stack
+            if L[0] is not None:
+                fsize = len(L[0])
+            elif R[0] is not None:
+                fsize = len(R[0])
+        if gsize > 0 and fsize > 0:
+            break
+    if gsize == 0:
+        gsize = size
+    if gsize == 0:
+        fsize = size
+    print('sizes', gsize, fsize)
     gcrop = gsize - size
     fcrop = fsize - size
     # Initialize PSF measurements.
