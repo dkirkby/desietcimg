@@ -551,7 +551,6 @@ def plot_distance_matrix(stamps, cmap='magma', masked_color='cyan', dpi=100, max
 
 def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolation='none'):
     # Calculate crops to use, without assuming which cameras are present in stacks.
-    gsize, fsize = stacks['GUIDE0'][0].shape[0], stacks['FOCUS1'][0][0].shape[0]
     guide = [k for k in stacks.keys() if k.startswith('GUIDE')]
     gsize = len(stacks[guide[0]][0]) if guide else 0
     focus = [k for k in stacks.keys() if k.startswith('FOCUS')]
