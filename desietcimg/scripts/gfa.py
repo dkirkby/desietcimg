@@ -145,7 +145,7 @@ def process(night, expid, args, pool, pool_timeout=5):
     # Save the summary plot.
     figpath = outpath / 'gfadiq_{0}.png'.format(expid)
     plt.savefig(figpath)
-    plt.clf()
+    plt.close(fig)
     logging.info('Wrote {0}'.format(figpath))
 
 
@@ -163,7 +163,7 @@ def gfadiq():
         help='Process all existing exposures on night')
     parser.add_argument('--watch', action='store_true',
         help='Wait for and process new exposures on night')
-    parser.add_argument('--watch-interval', type=float, metavar='T', default=5,
+    parser.add_argument('--watch-interval', type=float, metavar='T', default=2,
         help='Interval in seconds to check for new exposures with --watch')
     parser.add_argument('--save-frames', action='store_true',
         help='Save images of each GFA frame')
@@ -270,7 +270,9 @@ def gfadiq():
         return
 
     if args.batch or args.watch:
-        current_exposures = lambda: set((int(str(path)[-8:]) for path in nightpath.glob('????????')))
+        # Define a function to get the current list of GFA science exposures.
+        current_exposures = lambda: set(
+            (int(str(path.parent)[-8:]) for path in nightpath.glob('????????/gfa-*.fits.fz')))
         # Find the existing exposures on this night.
         existing = current_exposures()
         if args.batch:
