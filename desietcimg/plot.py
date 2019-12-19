@@ -709,7 +709,7 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
         ax.axis('off')
         ax.text(0.5, 0.85, 'hex z', transform=ax.transAxes, fontsize=10, color='c',
                 verticalalignment='bottom', horizontalalignment='center')
-        ax.text(0.5, 0.70, '{0:.0f}$\mu$m'.format(hexpos[3]), transform=ax.transAxes, fontsize=8, color='c',
+        ax.text(0.5, 0.70, '{0:.0f}$\mu$m'.format(hexpos[2]), transform=ax.transAxes, fontsize=8, color='c',
                 verticalalignment='bottom', horizontalalignment='center')
         if temp is not None:
             best = 430 + (7 - temp) * 110
