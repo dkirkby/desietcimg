@@ -701,4 +701,25 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
             ax.plot([-0.6, 0.3], [-0.8, 0.4], 'c-', lw=1)
         # Mirror
         ax.plot(xmirror, ymirror, 'c-', lw=3)
+
+    hexpos = [float(Z) for Z in meta['HEXPOS'].split(',')]
+    temp = meta.get('TRUSTEMP', None)
+    if len(hexpos) == 6:
+        ax = plt.axes((1 - x0, yR, x0, dy))
+        ax.axis('off')
+        ax.text(0.5, 0.85, 'hex z', transform=ax.transAxes, fontsize=10, color='c',
+                verticalalignment='bottom', horizontalalignment='center')
+        ax.text(0.5, 0.70, '{0:.0f}$\mu$m'.format(hexpos[3]), transform=ax.transAxes, fontsize=8, color='c',
+                verticalalignment='bottom', horizontalalignment='center')
+        if temp is not None:
+            best = 430 + (7 - temp) * 110
+            ax.text(0.5, 0.55, 'focus'.format(temp), transform=ax.transAxes, fontsize=10, color='c',
+                    verticalalignment='bottom', horizontalalignment='center')
+            ax.text(0.5, 0.40, '{0:.0f}$\mu$m'.format(best), transform=ax.transAxes, fontsize=8, color='c',
+                    verticalalignment='bottom', horizontalalignment='center')
+            ax.text(0.5, 0.25, 'truss', transform=ax.transAxes, fontsize=10, color='c',
+                    verticalalignment='bottom', horizontalalignment='center')
+            ax.text(0.5, 0.10, '{0:.1f}C'.format(temp), transform=ax.transAxes, fontsize=8, color='c',
+                    verticalalignment='bottom', horizontalalignment='center')
+
     return fig
