@@ -790,11 +790,10 @@ def load_raw(files, *keys, hdu=0, slices=None):
 class PSFMeasure(object):
 
     def __init__(self, stamp_size, fiber_diam_um=107, pixel_size_um=15, plate_scales=(70., 76.),
-                 max_offset_pix=3.5, noffset=15, nangbins=25):
+                 max_offset_pix=3.5, noffset=15, nangbins=20):
         self.stamp_size = stamp_size
         self.pixel_size_um = pixel_size_um
         self.plate_scales = plate_scales
-        self.nangbins = nangbins
         # Tabulate fiber templates for each (x,y) offset in the x >= 0 and y >= 0 quadrant.
         self.offset_template = np.empty((noffset, noffset, stamp_size, stamp_size), np.float32)
         max_rsq = (0.5 * fiber_diam_um / pixel_size_um) ** 2
@@ -805,6 +804,11 @@ class PSFMeasure(object):
                 self.offset_template[iy, ix] = make_template(
                     stamp_size, profile, dx=delta[ix], dy=delta[iy], normalized=False)
         self.xyoffset = np.linspace(-max_offset_pix, +max_offset_pix, 2 * noffset - 1)
+        dxy = np.arange(self.stamp_size) - 0.5 * (self.stamp_size - 1)
+        self.xgrid, self.ygrid = np.meshgrid(dxy, dxy, sparse=False)
+        rmax = dxy[-1] * self.pixel_size_um / max(self.plate_scales)
+        self.angbins = np.linspace(0., rmax, nangbins + 1)
+        self.rang = 0.5 * (self.angbins[1:] + self.angbins[:-1])
 
     def measure(self, P, W):
         assert P.shape == W.shape == (self.stamp_size, self.stamp_size)
@@ -834,27 +838,23 @@ class PSFMeasure(object):
         xc = self.xyoffset[ix]
         yc = self.xyoffset[iy]
         # Calculate the radius of each pixel in arcsecs relative to this center.
-        dxy = np.arange(self.stamp_size) - 0.5 * (self.stamp_size - 1)
-        xgrid, ygrid = np.meshgrid(dxy, dxy, sparse=False)
-        radius = np.hypot((xgrid - xc) * self.pixel_size_um / self.plate_scales[0],
-                          (ygrid - yc) * self.pixel_size_um / self.plate_scales[1]).reshape(-1)
+        radius = np.hypot((self.xgrid - xc) * self.pixel_size_um / self.plate_scales[0],
+                          (self.ygrid - yc) * self.pixel_size_um / self.plate_scales[1]).reshape(-1)
         # Fill ivar-weighted histograms of flux versus angular radius.
-        rmax = dxy[-1] * self.pixel_size_um / max(self.plate_scales)
-        angbins = np.linspace(0., rmax, self.nangbins + 1)
-        WZ, _ = np.histogram(radius, bins=angbins, weights=(P * W).reshape(-1))
-        W, _ = np.histogram(radius, bins=angbins, weights=W.reshape(-1))
+        WZ, _ = np.histogram(radius, bins=self.angbins, weights=(P * W).reshape(-1))
+        W, _ = np.histogram(radius, bins=self.angbins, weights=W.reshape(-1))
         # Calculate the circularized profile, normalized to 1 at (xc, yc).
         Z = np.divide(WZ, W, out=np.zeros_like(W), where=W > 0)
+        fwhm = -1
         if Z[0] > 0:
             Z /= Z[0]
             # Find the first bin where Z <= 0.5.
             k = np.argmax(Z <= 0.5)
-            # Use linear interpolation over this bin to estimate FWHM.
-            s = (0.5 - Z[k]) / (Z[k] - Z[k - 1])
-            rang = 0.5 * (angbins[1:] + angbins[:-1])
-            fwhm = 2 * ((1 - s) * rang[k] + s * rang[k + 1])
-        else:
-            fwhm = -1
+            if k > 0:
+                # Use linear interpolation over this bin to estimate FWHM.
+                s = (Z[k] - 0.5) / (Z[k] - Z[k - 1])
+                fwhm = 2 * ((1 - s) * self.rang[k] + s * self.rang[k - 1])
+        self.Z = Z
         return fwhm, np.max(fiberfrac)
 
 
