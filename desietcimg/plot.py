@@ -713,7 +713,7 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
                 verticalalignment='bottom', horizontalalignment='center')
         if temp is not None:
             best = 430 + (7 - temp) * 110
-            ax.text(0.5, 0.55, 'focus'.format(temp), transform=ax.transAxes, fontsize=10, color='c',
+            ax.text(0.5, 0.55, 'auto'.format(temp), transform=ax.transAxes, fontsize=10, color='c',
                     verticalalignment='bottom', horizontalalignment='center')
             ax.text(0.5, 0.40, '{0:.0f}$\mu$m'.format(best), transform=ax.transAxes, fontsize=8, color='c',
                     verticalalignment='bottom', horizontalalignment='center')
@@ -721,5 +721,24 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
                     verticalalignment='bottom', horizontalalignment='center')
             ax.text(0.5, 0.10, '{0:.1f}C'.format(temp), transform=ax.transAxes, fontsize=8, color='c',
                     verticalalignment='bottom', horizontalalignment='center')
+
+    adc1, adc2 = meta.get('ADC1PHI', None), meta.get('ADC2PHI', None)
+    if adc1 is not None and adc2 is not None:
+        ax = plt.axes((1 - x0, yL, x0, dy))
+        ax.axis('off')
+        ax.text(0.5, 0.85, 'ADC1 {0:.0f}$^\circ$'.format(adc1), transform=ax.transAxes, fontsize=8, color='c',
+                verticalalignment='bottom', horizontalalignment='center')
+        ax.text(0.5, 0.70, 'ADC2 {0:.0f}$^\circ$'.format(adc2), transform=ax.transAxes, fontsize=8, color='c',
+                verticalalignment='bottom', horizontalalignment='center')
+        ax = plt.axes((1 - x0, yL, x0, x0 * width / height))
+        ax.axis('off')
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(-1, 1)
+        r = 0.95
+        for phi in adc1, adc2:
+            phi = np.deg2rad(phi)
+            plt.plot([0, r * np.cos(phi)], [0, r * np.sin(phi)], 'c-', lw=2)
+        circle = matplotlib.patches.Circle((0, 0), r, color='c', ls='-', fill=False)
+        ax.add_artist(circle)
 
     return fig
