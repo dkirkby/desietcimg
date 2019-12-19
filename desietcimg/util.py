@@ -918,3 +918,20 @@ def uncompress(filein, pathout=None, overwrite=True):
                 data = hdu.read()
                 OUT.write(data, header=header, extname=hdu.get_extname())
     return str(fileout)
+
+
+def ADCangles(EL, HA, DEC, LAT=31.963972222):
+    """Calculate the parallactic angle in degrees W of N. Inputs in degrees."""
+    Z, HA, coDEC, coLAT = np.deg2rad([90 - EL, HA, 90 - DEC, 90 - LAT])
+    if Z == 0:
+        return np.zeros(3)
+    sinZ = np.sin(Z)
+    sinP = np.sin(HA) * np.sin(coLAT) / sinZ
+    cosP = (np.cos(coLAT) - np.cos(coDEC) * np.cos(Z)) / (np.sin(coDEC) * sinZ)
+    P = np.arctan2(sinP, cosP)
+    # Formulas from DESI-4957
+    tanZ = np.tan(Z)
+    HORIZON = P + 0.5 * np.pi
+    ADC1 = HORIZON + (0.0353 + tanZ * (0.2620 + tanZ * 0.3563))
+    ADC2 = HORIZON - (0.0404 + tanZ * (0.2565 + tanZ * 0.3576))
+    return np.rad2deg([P, ADC1, ADC2])
