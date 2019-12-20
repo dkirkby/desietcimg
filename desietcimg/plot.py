@@ -707,9 +707,9 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
     if len(hexpos) == 6:
         ax = plt.axes((1 - x0, yR, x0, dy))
         ax.axis('off')
-        ax.text(0.5, 0.85, 'hex z', transform=ax.transAxes, fontsize=10, color='c',
+        ax.text(0.5, 0.85, 'hex z', transform=ax.transAxes, fontsize=10, color='k',
                 verticalalignment='bottom', horizontalalignment='center')
-        ax.text(0.5, 0.70, '{0:.0f}$\mu$m'.format(hexpos[2]), transform=ax.transAxes, fontsize=8, color='c',
+        ax.text(0.5, 0.70, '{0:.0f}$\mu$m'.format(hexpos[2]), transform=ax.transAxes, fontsize=8, color='k',
                 verticalalignment='bottom', horizontalalignment='center')
         if temp is not None:
             best = 430 + (7 - temp) * 110
@@ -725,31 +725,45 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
     adc1, adc2 = meta.get('ADC1PHI'), meta.get('ADC2PHI')
     EL, HA, DEC = meta.get('MOUNTEL'), meta.get('MOUNTHA'), meta.get('MOUNTDEC')
     if adc1 is not None and adc2 is not None:
-        ax = plt.axes((1 - x0, yL, x0, dy))
-        ax.axis('off')
-        ax.text(0.5, 0.85, 'ADC1 {0:.0f}$^\circ$'.format(adc1), transform=ax.transAxes, fontsize=8, color='c',
-                verticalalignment='bottom', horizontalalignment='center')
-        ax.text(0.5, 0.70, 'ADC2 {0:.0f}$^\circ$'.format(adc2), transform=ax.transAxes, fontsize=8, color='c',
-                verticalalignment='bottom', horizontalalignment='center')
+        axt = plt.axes((1 - x0, yL, x0, dy))
+        axt.axis('off')
+        axt.text(0.5, 0.9, 'ADC1 {0:.0f}$^\circ$'.format(adc1), transform=axt.transAxes, fontsize=7,
+                 color='k', verticalalignment='bottom', horizontalalignment='center')
+        axt.text(0.5, 0.8, 'ADC2 {0:.0f}$^\circ$'.format(adc2), transform=axt.transAxes, fontsize=7,
+                 color='k', verticalalignment='bottom', horizontalalignment='center')
+        if EL is not None:
+            axt.text(0.5, 0.7, 'ELEV {0:.0f}$^\circ$'.format(EL), transform=axt.transAxes, fontsize=7,
+                     color='gray', verticalalignment='bottom', horizontalalignment='center')
         ax = plt.axes((1 - x0, yL, x0, x0 * width / height))
         ax.axis('off')
         ax.set_xlim(-1, 1)
         ax.set_ylim(-1, 1)
-        r = 0.95
-        if not (EL is None or HA is None or DEC is None):
-            PARA, PHI1, PHI2 = desietcimg.util.ADCangles(EL, HA, DEC)
-            # Match the layout in slide 20 of DESI-3522 with N up and E to the right.
-            PARA, PHI1, PHI2 = np.deg2rad([PARA, PHI1, PHI2])
-            u, v = np.cos(PARA), -np.sin(PARA)
-            plt.plot([0, v], [0, u], '-', c='gray', lw=1)
-            plt.plot([-u, u], [v, -v], '-', c='lightgray', lw=1)
-            for phi in PHI1, PHI2:
-                u, v = np.cos(phi), np.sin(phi)
-                plt.plot([-v, v], [u, -u], ':', c='lightgray', lw=1)
+        r = 0.98
+        circle = matplotlib.patches.Circle((0, 0), r, color='lightgray', ls='-', fill=False)
+        ax.add_artist(circle)
+        # Draw the horizon and zenith.
+        ax.plot([-r, r], [0, 0], '-', c='lightgray', lw=1)
+        ax.plot([0, 0], [0, r], '-', c='lightgray', lw=1)
+        # Draw the actual ADC angles.
         for phi in adc1, adc2:
             phi = np.deg2rad(phi)
-            plt.plot([0, r * np.cos(phi)], [0, r * np.sin(phi)], 'c-', lw=1)
-        circle = matplotlib.patches.Circle((0, 0), r, color='c', ls='-', fill=False)
-        ax.add_artist(circle)
+            ax.plot([0, r * np.sin(phi)], [0, r * np.cos(phi)], 'k-', lw=1)
+        if not (EL is None or HA is None or DEC is None):
+            # Following slide 20 of DESI-3522.
+            PARA, PHI1, PHI2 = desietcimg.util.ADCangles(EL, HA, DEC)
+            axt.text(0.5, 0.6, 'PARA {0:.0f}$^\circ$'.format(PARA), transform=axt.transAxes, fontsize=7,
+                     color='c', verticalalignment='bottom', horizontalalignment='center')
+            PARA, PHI1, PHI2, EL = np.deg2rad([PARA, PHI1, PHI2, EL])
+            # Draw the ADC angles necessary to cancel atmospheric refraction at HA.
+            HORIZON = PARA + 0.5 * np.pi
+            for phi in PHI1, PHI2:
+                u, v = r * np.cos(phi - HORIZON), r * np.sin(phi - HORIZON)
+                ax.plot([-u, u], [v, -v], ':', c='gray', lw=1)
+            # Draw the elevation angle.
+            u, v = r * np.cos(EL), r * np.sin(EL)
+            ax.plot([-u, 0, u], [v, 0, v], '-', c='gray', lw=1)
+            # Draw a North pointer at the parallactic angle relative to zenith.
+            u, v = 0.1 * r * np.sin(PARA), 0.1 * r * np.cos(PARA)
+            ax.plot([-u, v, 6 * u, -v, -u], [-v, -u, 6 * v, u, -v], 'c-', lw=2)
 
     return fig
