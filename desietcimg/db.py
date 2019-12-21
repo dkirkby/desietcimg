@@ -58,7 +58,7 @@ class Exposures(object):
         self.db = db
         self.cache = collections.OrderedDict()
         self.cachesize = cachesize
-        
+
     def __call__(self, expid, what=None):
         if what is not None and what not in self.columns:
             raise ValueError(f'Invalid column name: "{what}".')
@@ -99,17 +99,43 @@ class NightTelemetry(object):
         self.one_day = pd.Timedelta('1 days')
 
     def __call__(self, night, what=None, MJD=None):
+        """Return the telemetry for a single night.
+
+        Recently queried nights are cached so that repeated calls to this function for the
+        same night only trigger one database query.
+
+        Parameters
+        ----------
+        night : int
+            Night specified as an integer YYYYMMDD.
+        what : str or None
+            Name of the single column to fetch or None to return all columns.
+            When this is specified, the returned dataframe will have two columns:
+            the requested one plus MJD.
+        MJD : array or None
+            Array of MJD values where the value of ``what`` will be tabulated using
+            interpolation. Can be used to resample data to a uniform grid or
+            downsample a large dataset. Must be accompanied by ``what`` specifying
+            a numeric column and returns a 1D numpy array.
+
+        Returns
+        -------
+        dataframe or numpy array
+        """
         if what is not None and what not in self.columns:
             raise ValueError(f'Invalid column name "{what}". Pick from {self.what}.')
+        if MJD is not None and what is None:
+            raise ValueError(f'Must specify a column (what) with MJD values.')
+        # Calculate local midnight on night = YYYYMMDD as midnight UTC + 31 hours (assuming local = UTC-7)
+        try:
+            midnight = datetime.datetime.strptime(str(night), '%Y%m%d') + datetime.timedelta(days=1, hours=7)
+        except ValueError:
+            raise ValueError(f'Badly formatted or invalid night: "{night}".')
+        self.midnight = pd.Timestamp(midnight, tz='UTC')
         if night not in self.cache or MJD is not None:
-            # Calculate local noon on night.
-            when = datetime.datetime.strptime(str(night), '%Y%m%d')
-            tmin = when.replace(hour=7)
-            # Fetch data until local noon the next day.
-            tmax = tmin + datetime.timedelta(days=1)
-            # Convert to UTC timestamps.
-            tmin = pd.Timestamp(tmin, tz='UTC')
-            tmax = pd.Timestamp(tmax, tz='UTC')
+            # Fetch data from local noon on YYYYMMDD until local noon the next day.
+            tmin = self.midnight - pd.Timedelta(12, 'hours')
+            tmax = self.midnight + pd.Timedelta(12, 'hours')
         if MJD is not None:
             MJD = np.asarray(MJD)
             # Check that the min MJD is within our range.
