@@ -150,6 +150,30 @@ def process(night, expid, args, pool, pool_timeout=5):
     logging.info('Wrote {0}'.format(figpath))
 
 
+def get_gfa_exposures(inpath, checkpath, night, expstart=None, expstop=None):
+    """Return a list of existing paths to completed GFA exposures for night.
+    """
+    paths = []
+    # Has a directory for this night been created yet?
+    checknight = checkpath / str(night)
+    innight = inpath / str(night)
+    if not checknight.exists() or not innight.exists():
+        return paths
+    # Loop over all exposure paths under this night.
+    for exppath in checknight.glob('????????'):
+        expid = str(exppath)[-8:]
+        expnum = int(expid)
+        if expstart is not None and expnum < expstart:
+            continue
+        if expstop is not None and expnum >= expstop:
+            continue
+        for pattern in 'gfa-{0}.fits.fz', 'guide-{0}.fits.fz':
+            path = innight / expid / pattern.format(expid)
+            if path.exists():
+                paths.append(path)
+    return paths
+
+
 def gfadiq():
     parser = argparse.ArgumentParser(
         description='Summarize delivered image quality for a GFA exposure.',
@@ -174,6 +198,8 @@ def gfadiq():
         help='Path where raw data is organized under YYYYMMDD directories')
     parser.add_argument('--outpath', type=str, metavar='PATH',
         help='Path where outputs willl be organized under YYYYMMDD directories')
+    parser.add_argument('--checkpath', type=str, metavar='PATH',
+        help='Optional path where links are created to indicate a complete exposure')
     parser.add_argument('--calibpath', type=str, metavar='PATH',
         help='Path to GFA calibration FITS file to use')
     parser.add_argument('--logpath', type=str, metavar='PATH',
@@ -208,6 +234,18 @@ def gfadiq():
         print('Non-existant input path: {0}'.format(args.inpath))
         sys.exit(-2)
     logging.info('Input path is {0}'.format(args.inpath))
+
+    # Determine which directory to check for completed exposures.
+    if args.checkpath is None:
+        if host is 'DOS':
+            args.checkpath = '/data/dts/exposures/raw/'
+        else:
+            args.checkpath = args.inpath
+    if args.checkpath != args.inpath:
+        if not args.checkpath.exists():
+            print('Non-existant check path: {0}'.format(args.checkpath))
+            sys.exit(-2)
+        logging.info('Check path is {0}'.format(args.inpath))
 
     if args.night is None:
         print('Missing required argument: night.')
@@ -266,8 +304,10 @@ def gfadiq():
         else:
             print('Invalid --expid (should be N or N1-N2): "{0}"'.format(args.expid))
             sys.exit(-1)
-        for expid in range(start, stop):
-            process(args.night, expid, args, pool)
+        exposures = get_gfa_exposures(args.inpath, args.checkpath, args.night, start, stop)
+        print(exposures)
+        #for expid in range(start, stop):
+        #    process(args.night, expid, args, pool)
         return
 
     if args.batch or args.watch:
@@ -275,7 +315,7 @@ def gfadiq():
         current_exposures = lambda: set(
             (int(str(path.parent)[-8:]) for path in nightpath.glob('????????/gfa-*.fits.fz')))
         # Find the existing exposures on this night.
-        existing = current_exposures()
+        existing = get_gfa_exposures(args.inpath, args.checkpath, args.night)
         if args.batch:
             for expid in existing:
                 process(args.night, expid, args, pool)
