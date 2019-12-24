@@ -33,7 +33,7 @@ GFA = None
 raw = np.empty((1, 1032, 2248), np.uint32)
 
 
-def process_one(inpath, camera, framepath):
+def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath):
     """Process a single camera of a single exposure.
     """
     global GFA
@@ -41,21 +41,18 @@ def process_one(inpath, camera, framepath):
         if camera not in hdus:
             logging.error('Missing HDU {0}'.format(camera))
             return None
-        hdr = hdus[camera].read_header()
-        meta = {}
-        for key in 'NIGHT', 'EXPID', 'MJD-OBS', 'EXPTIME', 'GCCDTEMP':
-            if key not in hdr:
-                logging.error('Missing required key {0} for {1}'.format(key, camera))
-                return None
-            meta[key] = hdr[key]
-        raw[0] = hdus[camera][:, :]
         logging.info('Processing {0}'.format(camera))
+        if guiding:
+            raw[0] = hdus[camera][0, :, :]
+            exptime, ccdtemp = exptime[0], ccdtemp[0]
+        else:
+            raw[0] = hdus[camera][:, :]
         try:
             GFA.setraw(raw, name=camera)
         except ValueError as e:
             logging.error(e)
             return None
-        GFA.data -= GFA.get_dark_current(meta['GCCDTEMP'], meta['EXPTIME'])
+        GFA.data -= GFA.get_dark_current(ccdtemp, exptime)
         if camera.startswith('GUIDE'):
             GFA.get_psfs()
             stamps = GFA.psfs
@@ -65,7 +62,7 @@ def process_one(inpath, camera, framepath):
             stamps = GFA.donuts[0] + GFA.donuts[1]
             result = GFA.donut_stack
         if framepath is not None:
-            label = '{0} {1} {2:.1f}s'.format(meta['NIGHT'], meta['EXPID'], meta['EXPTIME'])
+            label = '{0} {1} {2:.1f}s {3:.1f}C'.format(night, expid, exptime, ccdtemp)
             plot_data(GFA.data[0], GFA.ivar[0], downsampling=2, label=label, stamps=stamps, colorhist=True)
             plt.savefig(framepath / '{0}_{1:08d}.{2}'.format(camera, meta['EXPID'], img_format), quality=80)
             plt.clf()
@@ -78,16 +75,19 @@ def process(inpath, args, pool, pool_timeout=5):
     if not inpath.exists():
         logging.error('Non-existant path: {0}'.format(inpath))
         return
-    # Read the header.
-    hdr = fitsio.read_header(str(inpath), ext=1)
-    if 'EXPTIME' not in hdr or not (hdr['EXPTIME'] > 0):
-        logging.info('Skipping GFA zero: {0}'.format(inpath))
+    # Is this a guiding exposure?
+    guiding = inpath.name.startswith('guide')
+    # Lookup the NIGHT, EXPID, EXPTIME from the primary header.
+    hdr = fitsio.read_header(str(inpath), ext='GUIDER' if guiding else 'GFA')
+    for k in 'NIGHT', 'EXPID', 'EXPTIME':
+        if k not in hdr:
+            logging.info('Skipping exposure with missing {0}: {1}'.format(k, inpath))
+            return
+    night = str(hdr['NIGHT'])
+    expid = '{0:08d}'.format(hdr['EXPID'])
+    if hdr['EXPTIME'] == 0:
+        logging.info('Skipping zero EXPTIME: {0}/{1}'.format(night, expid))
         return
-    night, expid = hdr.get('NIGHT'), hdr.get('EXPID')
-    if night is None or expid is None:
-        logging.warning('Skipping GFA exposure with missing NIGHT or EXPID.: {0}'.format(inpath))
-    night = str(night)
-    expid = '{0:08d}'.format(expid)
     # Prepare the output path.
     outpath = args.outpath / night / expid
     outpath.mkdir(parents=True, exist_ok=True)
@@ -101,14 +101,25 @@ def process(inpath, args, pool, pool_timeout=5):
     results = {}
     framepath = outpath if args.save_frames else None
     for camera in GFA.gfa_names:
+        if guiding and camera.startswith('FOCUS'):
+            # Guiding exposures do not record FOCUS data.
+            continue
+        # Fetch this camera's CCD temperatures and exposure times.
+        if guiding:
+            info = fitsio.read(str(inpath), ext=camera + 'T', columns=('EXPTIME', 'GCCDTEMP'))
+        else:
+            info = fitsio.read_header(str(inpath), ext=camera)
+        exptime = info['EXPTIME']
+        ccdtemp = info['GCCDTEMP']
         if pool is None:
-            result = process_one(inpath, camera, framepath)
+            result = process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath)
             if result is None:
                 logging.error('Error processing HDU {0}'.format(camera))
             else:
                 results[camera] = result
         else:
-            results[camera] = pool.apply_async(process_one, (inpath, camera, framepath))
+            results[camera] = pool.apply_async(
+                process_one, (inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath))
     if pool:
         # Collect the pooled results.
         for camera in results:
