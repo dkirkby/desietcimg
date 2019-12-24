@@ -72,26 +72,22 @@ def process_one(inpath, camera, framepath):
         return result
 
 
-def process(night, expid, args, pool, pool_timeout=5):
-    """Process a single exposure.
+def process(inpath, args, pool, pool_timeout=5):
+    """Process a single GFA exposure.
     """
-    # Locate the exposure path.
-    night = str(night)
-    expid = '{0:08d}'.format(int(expid))
-    inpath = args.inpath / night / expid
     if not inpath.exists():
         logging.error('Non-existant path: {0}'.format(inpath))
-        return
-    # Look for a GFA SCIENCE exposure.
-    inpath = inpath / 'gfa-{0}.fits.fz'.format(expid)
-    if not inpath.exists():
-        logging.info('Skipping exposure with no GFA science data: {0}'.format(inpath))
         return
     # Read the header.
     hdr = fitsio.read_header(str(inpath), ext=1)
     if 'EXPTIME' not in hdr or not (hdr['EXPTIME'] > 0):
         logging.info('Skipping GFA zero: {0}'.format(inpath))
         return
+    night, expid = hdr.get('NIGHT'), hdr.get('EXPID')
+    if night is None or expid is None:
+        logging.warning('Skipping GFA exposure with missing NIGHT or EXPID.: {0}'.format(inpath))
+    night = str(night)
+    expid = '{0:08d}'.format(expid)
     # Prepare the output path.
     outpath = args.outpath / night / expid
     outpath.mkdir(parents=True, exist_ok=True)
@@ -100,9 +96,8 @@ def process(night, expid, args, pool, pool_timeout=5):
     if fitspath.exists() and not args.overwrite:
         logging.info('Will not overwrite outputs in {0}'.format(outpath))
         return
-    # Open the FITS file to read.
-    logging.info('Processing {0}'.format(inpath))
     # Process each camera in the input.
+    logging.info('Processing {0}'.format(inpath))
     results = {}
     framepath = outpath if args.save_frames else None
     for camera in GFA.gfa_names:
@@ -171,7 +166,7 @@ def get_gfa_exposures(inpath, checkpath, night, expstart=None, expstop=None):
             path = innight / expid / pattern.format(expid)
             if path.exists():
                 paths.append(path)
-    return paths
+    return set(paths)
 
 
 def gfadiq():
@@ -305,28 +300,24 @@ def gfadiq():
             print('Invalid --expid (should be N or N1-N2): "{0}"'.format(args.expid))
             sys.exit(-1)
         exposures = get_gfa_exposures(args.inpath, args.checkpath, args.night, start, stop)
-        print(exposures)
-        #for expid in range(start, stop):
-        #    process(args.night, expid, args, pool)
+        for path in exposures:
+            process(path, args, pool)
         return
 
     if args.batch or args.watch:
-        # Define a function to get the current list of GFA science exposures.
-        current_exposures = lambda: set(
-            (int(str(path.parent)[-8:]) for path in nightpath.glob('????????/gfa-*.fits.fz')))
         # Find the existing exposures on this night.
         existing = get_gfa_exposures(args.inpath, args.checkpath, args.night)
         if args.batch:
-            for expid in existing:
-                process(args.night, expid, args, pool)
+            for path in existing:
+                process(path, args, pool)
         if args.watch:
             logging.info('Watching for new exposures...hit ^C to exit')
             try:
                 while True:
                     time.sleep(args.watch_interval)
-                    newexp = current_exposures() - existing
-                    for expid in newexp:
-                        process(args.night, expid, args, pool)
+                    newexp = get_gfa_exposures(args.inpath, args.checkpath, args.night) - existing
+                    for path in newexp:
+                        process(path, args, pool)
                     existing |= newexp
             except KeyboardInterrupt:
                 logging.info('Bye.')
