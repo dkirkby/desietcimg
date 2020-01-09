@@ -33,7 +33,7 @@ GFA = None
 raw = np.empty((1, 1032, 2248), np.uint32)
 
 
-def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath):
+def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath=None):
     """Process a single camera of a single exposure.
     """
     global GFA
@@ -64,12 +64,12 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
         if framepath is not None:
             label = '{0} {1} {2:.1f}s {3:.1f}C'.format(night, expid, exptime, ccdtemp)
             plot_data(GFA.data[0], GFA.ivar[0], downsampling=2, label=label, stamps=stamps, colorhist=True)
-            plt.savefig(framepath / '{0}_{1:08d}.{2}'.format(camera, meta['EXPID'], img_format), quality=80)
+            plt.savefig(framepath / '{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
             plt.clf()
         return result
 
 
-def process(inpath, args, pool, pool_timeout=5):
+def process(inpath, args, pool=None, pool_timeout=5):
     """Process a single GFA exposure.
     """
     if not inpath.exists():
