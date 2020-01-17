@@ -83,6 +83,10 @@ def process(inpath, args, pool=None, pool_timeout=5):
         if k not in hdr:
             logging.info('Skipping exposure with missing {0}: {1}'.format(k, inpath))
             return
+    cameras = hdr.get('ACQCAM' if guiding else 'IMAGECAM')
+    if cameras is None:
+        logging.info('Skipping exposure with missing ACQCAM/IMAGECAM: {0}'.format(inpath))
+        return
     night = str(hdr['NIGHT'])
     expid = '{0:08d}'.format(hdr['EXPID'])
     if hdr['EXPTIME'] == 0:
@@ -97,16 +101,10 @@ def process(inpath, args, pool=None, pool_timeout=5):
         logging.info('Will not overwrite outputs in {0}'.format(outpath))
         return
     # Process each camera in the input.
-    logging.info('Processing {0}'.format(inpath))
-    if guiding:
-        cameras = fitsio.read(str(inpath), extname='GUIDER', columns=('GUIDECAM',))['GUIDECAM']
-    else:
-        cameras = fitsio.read(str(inpath), extname='GFA', columns=('IMAGECAM',))['IMAGECAM']
     logging.info('Processing {0} from {1}'.format(cameras, inpath))
-    cameras = cameras.split(',')
     results = {}
     framepath = outpath if args.save_frames else None
-    for camera in cameras:
+    for camera in cameras.split(','):
         if guiding and camera.startswith('FOCUS'):
             # Guiding exposures do not record FOCUS data.
             continue
