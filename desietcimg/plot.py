@@ -676,12 +676,14 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
     ax.axis('off')
     ax.text(0.5, 0.8, 'FWHM', transform=ax.transAxes, fontsize=12, color='gray',
             verticalalignment='bottom', horizontalalignment='center')
-    ax.text(0.5, 0.6, '{0:.2f}"'.format(np.nanmedian(fwhm_vec)), transform=ax.transAxes, fontsize=20, color='k',
-            verticalalignment='bottom', horizontalalignment='center', fontweight='bold')
+    if len(fwhm_vec) > 0:
+        ax.text(0.5, 0.6, '{0:.2f}"'.format(np.nanmedian(fwhm_vec)), transform=ax.transAxes, fontsize=20, color='k',
+                verticalalignment='bottom', horizontalalignment='center', fontweight='bold')
     ax.text(0.5, 0.3, 'FFRAC', transform=ax.transAxes, fontsize=12, color='gray',
             verticalalignment='bottom', horizontalalignment='center')
-    ax.text(0.5, 0.1, '{0:.0f}%'.format(100 * np.nanmedian(ffrac_vec)), transform=ax.transAxes, fontsize=20, color='k',
-            verticalalignment='bottom', horizontalalignment='center', fontweight='bold')
+    if len(fwhm_vec) > 0:
+        ax.text(0.5, 0.1, '{0:.0f}%'.format(100 * np.nanmedian(ffrac_vec)), transform=ax.transAxes, fontsize=20, color='k',
+                verticalalignment='bottom', horizontalalignment='center', fontweight='bold')
 
     # Fill corner regions.
     xmirror = np.linspace(-0.8, 0.8, 15)
