@@ -98,9 +98,15 @@ def process(inpath, args, pool=None, pool_timeout=5):
         return
     # Process each camera in the input.
     logging.info('Processing {0}'.format(inpath))
+    if guiding:
+        cameras = fitsio.read(str(inpath), extname='GUIDER', columns=('GUIDECAM',))['GUIDECAM']
+    else:
+        cameras = fitsio.read(str(inpath), extname='GFA', columns=('IMAGECAM',))['IMAGECAM']
+    logging.info('Processing {0} from {1}'.format(cameras, inpath))
+    cameras = cameras.split(',')
     results = {}
     framepath = outpath if args.save_frames else None
-    for camera in GFA.gfa_names:
+    for camera in cameras:
         if guiding and camera.startswith('FOCUS'):
             # Guiding exposures do not record FOCUS data.
             continue
