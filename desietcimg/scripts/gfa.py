@@ -252,6 +252,7 @@ def gfadiq():
         else:
             args.checkpath = args.inpath
     if args.checkpath != args.inpath:
+        args.checkpath = Path(args.checkpath)
         if not args.checkpath.exists():
             print('Non-existant check path: {0}'.format(args.checkpath))
             sys.exit(-2)
