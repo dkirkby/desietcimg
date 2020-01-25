@@ -149,10 +149,34 @@ class GMMFit(object):
 
     @staticmethod
     def get_Cinv(sigma1, sigma2, rho):
+        """Calculate the inverse covariance matrix from model parameters.
+        """
         S12 = sigma1 * sigma2
         C12 = S12 * rho
         detC = S12 ** 2 - C12 ** 2
         return np.array(((sigma2 ** 2, -C12), (-C12, sigma1 ** 2))) / detC
+
+    @staticmethod
+    def transform(pin, forward=True):
+        """Transform the model parameters to/from internal unbounded parameters.
+        """
+        pout = pin.copy()
+        deriv = np.ones_like(pout)
+        k0 = len(pin) % 6
+        (ufunc1, ufunc2) = (np.exp, np.tanh) if forward else (np.log, np.arctanh)
+        if forward:
+            for k in (0, 3, 4):
+                pout[k0 + k::6] = np.exp(pin[k0 + k::6])
+                deriv[k0 + k::6] = pout[k0 + k::6]
+            pout[k0 + 5::6] = np.tanh(pin[k0 + 5::6])
+            deriv[k0 + 5::6] = 2 / (np.cosh(2 * pin[k0 + 5::6]) + 1)
+        else:
+            for k in (0, 3, 4):
+                pout[k0 + k::6] = np.log(pin[k0 + k::6])
+                deriv[k0 + k::6] = 1 / pin[k0 + k::6]
+            pout[k0 + 5::6] = np.arctanh(pin[k0 + 5::6])
+            deriv[k0 + 5::6] = 1 / (1 - pin[k0 + 5::6] ** 2)
+        return pout, deriv
 
     def predict(self, params, compute_partials=False):
         """Calculate a predicted model and (optionally) its partial derivatives.
@@ -164,7 +188,7 @@ class GMMFit(object):
 
         Parameters
         ----------
-        params : array
+        params : numpy array
             Array of parameters to use.
         compute_partials : bool
             Compute partial derivative images with respect to each input parameter
@@ -176,7 +200,6 @@ class GMMFit(object):
             Returns the predicted image D or a tuple (D, P) where P is an array of
             partial derivative images with respect to each of the input parameters.
         """
-        params = np.asarray(params)
         nparams = len(params)
         if compute_partials:
             partials = np.empty((nparams,) + self.shape)
@@ -216,5 +239,49 @@ class GMMFit(object):
                 partials[pnext + 5] = sigma1[k] * sigma2[k] * dC12                     # partial wrt rho[k]
                 pnext += 6
             result += norm[k] * model
-
         return (result, partials) if compute_partials else result
+
+    def nll(self, params, data, ivar, compute_partials=False, transformed=False):
+        """Calculate the negative-log-likelihood of the specified observation.
+
+        Parameters
+        ----------
+        params : array
+            1D array of parameters to use for the model prediction.
+        data : array
+            2D array of observed data values.
+        ivar : array
+            2D array of estimated inverse variances for each observed data value.
+            Must have the same dimensions as data.
+        compute_partials : bool
+            Calculate and return partial derivatives of the result wrt to each
+            input parameter when True.
+        transformed : bool
+            Apply non-linear transformations to compute bounded model parameter
+            values from the unbounded input values. The exp transform is used
+            for model parameters that must be > 0 (NORM, SIGMA1, SIGMA2) and
+            the tanh transform is used for -1 < RHO < +1.  When compute_partials
+            is True, the returned derivatives will be respect to the unbounded
+            input parameters.
+
+        Returns
+        -------
+        array or tuple
+            Returns the calculated negative-log-likelihood nll or a tuple
+            (nll, nll_partials) when compute_partials is True.
+        """
+        params = np.asarray(params)
+        if transformed:
+            # Transform from internal unbound params to model params and compute the
+            # corresponding transform derivatives.
+            params, derivs = self.transform(params)
+        if compute_partials:
+            predicted, partials = self.predict(params, compute_partials=True)
+            nll_partials = 2 * np.sum(ivar * (predicted - data) * partials, axis=(1, 2))
+            if transformed:
+                # Transform the partial derivatives to be wrt the internal params.
+                nll_partials *= derivs
+        else:
+            predicted = self.predict(params, compute_partials=False)
+        nll = np.sum(ivar * (predicted - data) ** 2)
+        return (nll, nll_partials) if compute_partials else nll
