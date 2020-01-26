@@ -1,5 +1,7 @@
 import numpy as np
+
 import scipy.special
+import scipy.optimize
 
 
 class GMMFit(object):
@@ -244,6 +246,10 @@ class GMMFit(object):
     def nll(self, params, data, ivar, compute_partials=False, transformed=False):
         """Calculate the negative-log-likelihood of the specified observation.
 
+        Results are normalized per data pixel so that the output scale is
+        independent of the data size, which should give more consistent
+        minimization performance.
+
         Parameters
         ----------
         params : array
@@ -277,11 +283,34 @@ class GMMFit(object):
             params, derivs = self.transform(params)
         if compute_partials:
             predicted, partials = self.predict(params, compute_partials=True)
-            nll_partials = 2 * np.sum(ivar * (predicted - data) * partials, axis=(1, 2))
+            nll_partials = 2 * np.sum(
+                ivar * (predicted - data) * partials, axis=(1, 2)) / data.size
             if transformed:
                 # Transform the partial derivatives to be wrt the internal params.
                 nll_partials *= derivs
         else:
             predicted = self.predict(params, compute_partials=False)
-        nll = np.sum(ivar * (predicted - data) ** 2)
+        nll = np.sum(ivar * (predicted - data) ** 2) / data.size
         return (nll, nll_partials) if compute_partials else nll
+
+    def minimize(self, initial_params, data, ivar, transformed=True, kwargs={}):
+        """Driver for scipy.optimize.minimize with optional partials and transforms.
+        """
+        if transformed:
+            initial_params, _ = self.transform(initial_params, forward=False)
+        args = (data, ivar, kwargs.get('jac') is True, transformed)
+        result = scipy.optimize.minimize(self.nll, initial_params, args, **kwargs)
+        final_params = result.x if result.success else initial_params
+        if transformed:
+            final_params, _ = self.transform(final_params, forward=True)
+        return final_params, result
+
+    def generate(self, params, ivar, seed=123):
+        """Generate a random realization of a model with specified parameters.
+        """
+        data = self.predict(params)
+        rng = np.random.RandomState(seed)
+        ivar = np.ones_like(data) * ivar
+        mask = ivar > 0
+        data[mask] += rng.normal(loc=0, scale=ivar[mask] ** -0.5)
+        return data, ivar
