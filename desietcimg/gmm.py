@@ -3,6 +3,8 @@ import numpy as np
 import scipy.special
 import scipy.optimize
 
+import desietcimg.util
+
 
 class GMMFit(object):
 
@@ -314,3 +316,55 @@ class GMMFit(object):
         mask = ivar > 0
         data[mask] += rng.normal(loc=0, scale=ivar[mask] ** -0.5)
         return data, ivar
+
+    def fit(self, data, ivar, ngauss, nstart=5, sigma_min=1, sigma_max=5):
+        """Fit data to a mixture of Gaussians.
+        """
+        ny, nx = data.shape
+        # Smooth the input image.
+        data_smooth, ivar_smooth = desietcimg.util.smooth(data, ivar, smoothing=1.5)
+
+        # Estimate the background level as the most probable pixel value in the smoothed image.
+        bins = np.linspace(*np.percentile(data_smooth, (1, 95)), 50)
+        hist, _ = np.histogram(data_smooth.reshape(-1), bins=bins)
+        k = np.argmax(hist)
+        bglevel = 0.5 * (bins[k] + bins[k + 1])
+        # Convert to a background density.
+        bgdensity = bglevel / np.mean(self.areas)
+        # Estimate the total signal.
+        sigtot = data_smooth.sum() - bgdensity * self.areas.sum()
+        # List the minimization methods to try, starting with the fastest
+        # and ending with the most robust (likely to succeed).
+        methods = (
+            #dict(method='trust-krylov', jac=True, hess='2-point', options={}),
+            dict(method='BFGS', jac=True, options={'gtol': 1e-2}),
+            dict(method='Nelder-Mead', options={'xatol': 1e-2, 'fatol': 1e-2, 'maxiter': ngauss * 1000}),
+        )
+        # Loop over random initial starting points.
+        params = np.zeros(1 + 6 * ngauss)
+        rng = np.random.RandomState(seed=123)
+        nll_min = np.inf
+        for i in range(nstart):
+            params[0] = bgdensity
+            base = 1
+            # Generate random fractions.
+            frac = rng.uniform(size=ngauss)
+            # Normalize to the total signal.
+            params[base::6] = sigtot * frac / frac.sum()
+            # Set means to the stamp center.
+            params[base + 1::6] = nx / 2
+            params[base + 2::6] = nx / 2
+            # Generate random sigmas.
+            params[base + 3::6], params[base + 4::6] = rng.uniform(
+                low=sigma_min, high=sigma_max, size=(2, ngauss))
+            # Fix initial correlations to zero.
+            params[base + 5::6] = 0
+            # Try to fit.
+            for method in methods:
+                final_params, result = self.minimize(params, data, ivar, kwargs=method)
+                if result.success:
+                    if result.fun < nll_min:
+                        nll_min = result.fun
+                        best_params, best_result = final_params, result
+                    break
+        return None if nll_min == np.inf else best_params
