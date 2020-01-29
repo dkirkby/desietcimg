@@ -159,7 +159,7 @@ class GMMFit(object):
         return np.array(((sigma2 ** 2, -C12), (-C12, sigma1 ** 2))) / detC
 
     @staticmethod
-    def transform(pin, forward=True):
+    def transform(pin, forward=True, rhomax=0.9):
         """Transform the model parameters to/from internal unbounded parameters.
         """
         pout = pin.copy()
@@ -170,14 +170,14 @@ class GMMFit(object):
             for k in (0, 3, 4):
                 pout[k0 + k::6] = np.exp(pin[k0 + k::6])
                 deriv[k0 + k::6] = pout[k0 + k::6]
-            pout[k0 + 5::6] = np.tanh(pin[k0 + 5::6])
-            deriv[k0 + 5::6] = 2 / (np.cosh(2 * pin[k0 + 5::6]) + 1)
+            pout[k0 + 5::6] = rhomax * np.tanh(pin[k0 + 5::6])
+            deriv[k0 + 5::6] = 2 * rhomax / (np.cosh(2 * pin[k0 + 5::6]) + 1)
         else:
             for k in (0, 3, 4):
                 pout[k0 + k::6] = np.log(pin[k0 + k::6])
                 deriv[k0 + k::6] = 1 / pin[k0 + k::6]
-            pout[k0 + 5::6] = np.arctanh(pin[k0 + 5::6])
-            deriv[k0 + 5::6] = 1 / (1 - pin[k0 + 5::6] ** 2)
+            pout[k0 + 5::6] = np.arctanh(pin[k0 + 5::6] / rhomax)
+            deriv[k0 + 5::6] = 1 / (1 - (pin[k0 + 5::6] / rhomax) ** 2) / rhomax
         return pout, deriv
 
     def predict(self, params, compute_partials=False):
