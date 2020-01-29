@@ -21,8 +21,8 @@ class GMMFit(object):
             1D array of n2+1 increasing values that specify the pixel edges
             along the x2 direction.
         """
-        self.x1_edges = np.asarray(x1_edges)
-        self.x2_edges = np.asarray(x2_edges)
+        self.x1_edges = np.asarray(x1_edges, dtype=float)
+        self.x2_edges = np.asarray(x2_edges, dtype=float)
         self.shape = len(self.x2_edges) - 1, len(self.x1_edges) - 1
         # Check for increasing edge values.
         if np.any(np.diff(self.x1_edges) <= 0) or np.any(np.diff(self.x2_edges) <= 0):
@@ -340,6 +340,9 @@ class GMMFit(object):
             dict(method='BFGS', jac=True, options={'gtol': 1e-2}),
             dict(method='Nelder-Mead', options={'xatol': 1e-2, 'fatol': 1e-2, 'maxiter': ngauss * 1000}),
         )
+        # Calculate the image center.
+        mu1 = 0.5 * (self.x1_edges[0] + self.x1_edges[-1])
+        mu2 = 0.5 * (self.x2_edges[0] + self.x2_edges[-1])
         # Loop over random initial starting points.
         params = np.zeros(1 + 6 * ngauss)
         rng = np.random.RandomState(seed=123)
@@ -352,8 +355,8 @@ class GMMFit(object):
             # Normalize to the total signal.
             params[base::6] = sigtot * frac / frac.sum()
             # Set means to the stamp center.
-            params[base + 1::6] = nx / 2
-            params[base + 2::6] = nx / 2
+            params[base + 1::6] = mu1
+            params[base + 2::6] = mu2
             # Generate random sigmas.
             params[base + 3::6], params[base + 4::6] = rng.uniform(
                 low=sigma_min, high=sigma_max, size=(2, ngauss))
