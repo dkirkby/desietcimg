@@ -371,3 +371,93 @@ class GMMFit(object):
                         best_params, best_result = final_params, result
                     break
         return None if nll_min == np.inf else best_params
+
+    def dither(self, params, offsets):
+        """Tabulate dithered predictions for this model at specified offsets.
+
+        Use with meth:`fit_dithered` to estimate the flux and centroid of input
+        data with errors.
+
+        Parameters
+        ----------
+        params : array
+            1D array of model parameters to use.
+        offsets : array
+            1D array of offsets to apply to the mean of each Gaussian component.
+
+        Returns
+        -------
+        array
+            Array with shape (noffsets, noffests, nx2, nx1) where the first two indices
+            are for offsets in mu2 and mu1, respectively.
+        """
+        # Make a copy.
+        params = np.array(params)
+        # Normalize.
+        base = len(params) % 6
+        assert base in (0, 1), 'Invalid params length.'
+        norm = params[base::6].sum()
+        assert norm > 0, 'Normalization sum is <= 0.'
+        params[base::6] /= norm
+        # Zero any background offset.
+        if base:
+            params[0] = 0
+        # Remember the original means.
+        mu1 = params[base + 1::6].copy()
+        mu2 = params[base + 2::6].copy()
+        # Loop over offsets to generate an array of dithered models.
+        noffsets = len(offsets)
+        dithered = np.empty((noffsets, noffsets) + self.shape)
+        for iy, dy in enumerate(offsets):
+            for ix, dx in enumerate(offsets):
+                params[base + 1::6] = mu1 + dx
+                params[base + 2::6] = mu2 + dy
+                dithered[iy, ix] = self.predict(params)
+        return dithered
+
+    def fit_dithered(self, offsets, dithered, data, ivar):
+        """Fit a dithered model to data with errors and return the estimated centroid, bg and flux.
+
+        Note that the best fit centroid offset will be restricted to the input grid of offsets.
+        This method uses no iteration so runs in a fixed time and will always provide an answer.
+
+        Parameters
+        ----------
+        offsets : array
+            1D array of offsets used to created the dithered images.
+        dithered : array
+            Array with shape (noffsets, noffests, nx2, nx1) where the first two indices
+            are for offsets in mu2 and mu1, respectively. Usually obtained by
+            calling :meth:`dither`.
+        data : array
+            2D array of observed pixel values.
+        ivar : array
+            2D array of corresponding pixel  inverse variances.
+
+        Returns
+        -------
+        tuple
+            Tuple (dx, dy, flux, bgdensity, nll) of the best-fit centroid offsets (dx, dy),
+            integrated flux, background density and nll value per pixel.
+        """
+        noffsets = len(offsets)
+        if dithered.shape != (noffsets, noffsets) + data.shape:
+            raise ValueError('Input dithered array has unexpected shape.')
+        if data.shape != ivar.shape:
+            raise ValueError('Input data and ivar have different shapes.')
+        # Calculate the best-fit flux and background for each offset hypothesis.
+        M11 = np.sum(ivar * dithered ** 2, axis=(2, 3))
+        M12 = np.sum(ivar * self.areas * dithered, axis=(2, 3))
+        M22 = np.sum(ivar * self.areas ** 2)
+        A1 = np.sum(ivar * data * dithered, axis=(2, 3))
+        A2 = np.sum(ivar * data * self.areas)
+        det = M11 * M22 - M12 ** 2
+        flux = (M22 * A1 - M12 * A2) / det
+        bgdensity = (M11 * A2 - M12 * A1) / det
+        # Calculate the corresponding NLL values.
+        S = (noffsets, noffsets, 1, 1)
+        pred = flux.reshape(S) * dithered + bgdensity.reshape(S) * self.areas
+        nll = 0.5 * np.sum(ivar * (data - pred) ** 2, axis=(2, 3))
+        # Find the offsets in (x1, x2) with the minimum nll.
+        iy, ix = np.unravel_index(np.argmin(nll), (noffsets, noffsets))
+        return offsets[ix], offsets[iy], flux[iy, ix], bgdensity[iy, ix], nll[iy, ix] / data.size
