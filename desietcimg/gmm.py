@@ -437,8 +437,9 @@ class GMMFit(object):
         Returns
         -------
         tuple
-            Tuple (dx, dy, flux, bgdensity, nll) of the best-fit centroid offsets (dx, dy),
-            integrated flux, background density and nll value per pixel.
+            Tuple (dx, dy, flux, bgdensity, nll, best_fit) of the best-fit centroid
+            offsets (dx, dy), integrated flux, background density, nll value per pixel,
+            and best-fit dither template.
         """
         noffsets = len(offsets)
         if dithered.shape != (noffsets, noffsets) + data.shape:
@@ -460,4 +461,8 @@ class GMMFit(object):
         nll = 0.5 * np.sum(ivar * (data - pred) ** 2, axis=(2, 3))
         # Find the offsets in (x1, x2) with the minimum nll.
         iy, ix = np.unravel_index(np.argmin(nll), (noffsets, noffsets))
-        return offsets[ix], offsets[iy], flux[iy, ix], bgdensity[iy, ix], nll[iy, ix] / data.size
+        return (
+            offsets[ix], offsets[iy],
+            flux[iy, ix], bgdensity[iy, ix],
+            nll[iy, ix] / data.size,
+            dithered[iy, ix])
