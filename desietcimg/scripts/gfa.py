@@ -25,28 +25,148 @@ import matplotlib.pyplot as plt
 import fitsio
 
 from desietcimg.gfa import *
+from desietcimg.gmm import *
 from desietcimg.plot import *
 from desietcimg.util import *
 
 # Globals shared by process_one below.
 GFA = None
-raw = np.empty((1, 1032, 2248), np.uint32)
+GMM = None
+rawbuf = np.empty((1, 1032, 2248), np.uint32)
 
 
-def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath=None):
+def process_guide_sequence(self, T, WT, GMM, stars, exptime, stampsize=25, maxdither=3, ndither=31,
+                           zeropoint=27.06, fiber_diam_um=107, pixel_size_um=15):
+    """
+    """
+    print('process_guide_sequence')
+    #global GFA, GMM
+    return
+    assert stampsize % 2 == 1, 'stampsize must be odd'
+    halfsize = stampsize // 2
+    nstars = len(stars)
+    if nstars <= 0:
+        print('No guide stars available')
+        return
+    nexp, ny, nx = self.data.shape
+    print('nexp', nexp, 'nstars', nstars)
+    assert exptime.shape == (nexp,)
+    nexp -= 1 # do not include the acquisition image.
+    if nexp <= 0:
+        print('No guide frames to process')
+        return
+    exptime = exptime[1:]
+    nT = len(T)
+    assert T.shape == WT.shape == (nT, nT)
+    # Trim the PSF to the stamp size to use for fitting.
+    assert stampsize <= nT
+    ntrim = (nT - stampsize) // 2
+    print('nT', nT, ntrim)
+    S = slice(ntrim, ntrim + stampsize)
+    T, WT = T[S, S], WT[S, S]
+    # Fit the PSF to a Gaussian mixture model.
+    params = GMM.fit(T, WT, ngauss=3)
+    if params is None:
+        print('Unable to fit PSF model.')
+        return
+    print(params)
+    # Prepare dithered fits.
+    offsets = np.linspace(-maxdither, maxdither, ndither)
+    dithered = GMM.dither(params, offsets)
+    # Initialize fiber templates for each guide star target centroid.
+    max_rsq = (0.5 * fiber_diam_um / pixel_size_um) ** 2
+    profile = lambda x, y: 1.0 * (x ** 2 + y ** 2 < max_rsq)
+    # Initialize stacked results.
+    Dsum = np.zeros((stampsize, stampsize))
+    WDsum = np.zeros((stampsize, stampsize))
+    Msum = np.zeros((stampsize, stampsize))
+    params = np.empty((nstars, nexp, 5))
+    for istar in range(nstars):
+        # Lookup the platemaker target coordinates and magnitude for this guide star.
+        y0, x0, rmag = stars[istar]['ROW'], stars[istar]['COL'], stars[istar]['MAG']
+        # Convert from PlateMaker indexing convention to (0,0) centered in bottom-left pixel.
+        y0 -= 0.5
+        x0 -= 0.5
+        # Convert rflux to predicted detected electrons with
+        # perfect atmospheric transmission and fiber acceptance.
+        nelec_pred = 10 ** (-(rmag - zeropoint) / 2.5) * exptime
+        # Build a stamp centered on these coordinates.
+        iy, ix = np.round(y0).astype(int), np.round(x0).astype(int)
+        ylo, yhi = iy - halfsize, iy + halfsize + 1
+        xlo, xhi = ix - halfsize, ix + halfsize + 1
+        if ylo < 0 or yhi > ny or xlo < 0 or xhi > nx:
+            print(f'Skipping stamp too close to border at ({x0},{y0})')
+            continue
+        SY, SX = slice(ylo, yhi), slice(xlo, xhi)
+        # Prepare a fiber template centered on the target position.
+        fiber = desietcimg.util.make_template(
+            stampsize, profile, dx=x0 - ix, dy=y0 - iy, normalized=False)
+        # Do not include the acquisition image.
+        Dframes = self.data[1:, SY, SX]
+        WDframes = self.ivar[1:, SY, SX]
+        Dsum[:] = 0
+        WDsum[:] = 0
+        Msum[:] = 0
+        for iexp in range(nexp):
+            D, WD = Dframes[iexp].copy(), WDframes[iexp].copy()
+            # Estimate centroid, flux and constant background.
+            dx, dy, flux, bg, nll, best_fit = GMM.fit_dithered(offsets, dithered, D, WD)
+            # Calculate the flux fraction within the fiber aperture using the best-fit model.
+            fiberfrac = np.sum(fiber * best_fit)
+            # Accumulate this exposure.
+            Dsum += D * WD
+            WDsum += WD
+            Msum += flux * best_fit
+            params[istar, iexp] = (dx, dy, flux / nelec_pred[iexp], fiberfrac, nll)
+        Dsum = np.divide(Dsum, WDsum, out=np.zeros_like(Dsum), where=WDsum > 0)
+
+        if istar == 0:
+            #fig, ax = desietcimg.plot.plot_data(Dsum, WDsum, downsampling=1, zoom=8)
+            plt.imshow(Dsum, interpolation='none', origin='lower')
+            plt.colorbar()
+            plt.show()
+            plt.imshow(Msum, interpolation='none', origin='lower')
+            plt.colorbar()
+            plt.show()
+        #ax.plot(params[:, 0] + halfsize, params[:, 1] + halfsize, 'rx', alpha=0.5)
+        #ax.plot(params[:, 2])
+        #plt.show()
+
+    fig, ax = plt.subplots(4, 1,  figsize=(12, 12), sharex=True)
+    for istar in range(nstars):
+        ax[0].plot(params[istar, :, 0], 'x-')
+        ax[0].plot(params[istar, :, 1], '+-')
+        ax[1].plot(params[istar, :, 2])
+        ax[2].plot(params[istar, :, 3])
+        ax[3].plot(params[istar, :, 4])
+    ax[0].set_ylabel('Centroid Offset [pix]')
+    ax[1].set_ylabel('Transparency')
+    ax[2].set_ylabel('Fiber Fraction')
+    ax[3].set_ylabel('Fit Min NLL')
+    ax[3].set_xlabel('Guide Exposure #')
+
+
+def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath=None, stars=None):
     """Process a single camera of a single exposure.
     """
     global GFA
+    guide_analysis_stampsize = 25
     with fitsio.FITS(str(inpath), mode='r') as hdus:
         if camera not in hdus:
             logging.error('Missing HDU {0}'.format(camera))
             return None
         logging.info('Processing {0}'.format(camera))
-        if guiding:
-            raw[0] = hdus[camera][0, :, :]
-            exptime, ccdtemp = exptime[0], ccdtemp[0]
+        if guiding and stars is not None:
+            # Read all exposures.
+            raw = hdus[camera][:, :, :]
         else:
-            raw[0] = hdus[camera][:, :]
+            if guiding:
+                # Only process the initial acquisition image of a guideing sequence.
+                raw = rawbuf[0] = hdus[camera][0, :, :]
+                exptime, ccdtemp = exptime[0], ccdtemp[0]
+            else:
+                # There is only one exposure to process.
+                raw = rawbuf[0] = hdus[camera][:, :]
         try:
             GFA.setraw(raw, name=camera)
         except ValueError as e:
@@ -56,6 +176,8 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
         if camera.startswith('GUIDE'):
             GFA.get_psfs()
             stamps = GFA.psfs
+            if stars is not None:
+                process_guide_sequence(GFA, *GFA.psf_stack, GMM, stars, exptime, stampsize=guide_analysis_stampsize)
             result = GFA.psf_stack
         else:
             GFA.get_donuts()
@@ -92,6 +214,9 @@ def process(inpath, args, pool=None, pool_timeout=5):
     if hdr['EXPTIME'] == 0:
         logging.info('Skipping zero EXPTIME: {0}/{1}'.format(night, expid))
         return
+    if guiding and args.guide_stars:
+        assert GMM is not None, 'GMM not initialized.'
+        PlateMaker = fitsio.read(str(inpath), ext='PMGSTARS')
     # Prepare the output path.
     outpath = args.outpath / night / expid
     outpath.mkdir(parents=True, exist_ok=True)
@@ -109,21 +234,28 @@ def process(inpath, args, pool=None, pool_timeout=5):
             # Guiding exposures do not record FOCUS data.
             continue
         # Fetch this camera's CCD temperatures and exposure times.
+        stars = None
         if guiding:
             info = fitsio.read(str(inpath), ext=camera + 'T', columns=('EXPTIME', 'GCCDTEMP'))
+            logging.info('Processing {0} guide frames'.format(len(info)))
+            if args.guide_stars:
+                stars = PlateMaker[PlateMaker['GFA_LOC'] == camera]
+                print(stars.dtype)
+                print(stars)
+                logging.info('Processing {0} guide stars'.format(len(stars)))
         else:
             info = fitsio.read_header(str(inpath), ext=camera)
         exptime = info['EXPTIME']
         ccdtemp = info['GCCDTEMP']
         if pool is None:
-            result = process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath)
+            result = process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath, stars)
             if result is None:
                 logging.error('Error processing HDU {0}'.format(camera))
             else:
                 results[camera] = result
         else:
             results[camera] = pool.apply_async(
-                process_one, (inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath))
+                process_one, (inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath, stars))
     if pool:
         # Collect the pooled results.
         for camera in results:
@@ -202,6 +334,10 @@ def gfadiq():
         help='Interval in seconds to check for new exposures with --watch')
     parser.add_argument('--save-frames', action='store_true',
         help='Save images of each GFA frame')
+    parser.add_argument('--guide-stars', action='store_true',
+        help='Measure guide stars in each frame of any guiding sequences')
+    parser.add_argument('--psf-pixels', type=int, default=25,
+        help='Size of PSF stamp to use for guide star measurements')
     parser.add_argument('--overwrite', action='store_true',
         help='Overwrite existing outputs')
     parser.add_argument('--inpath', type=str, metavar='PATH',
@@ -293,6 +429,12 @@ def gfadiq():
     # Initialize the GFA analysis object.
     global GFA
     GFA = GFACamera(calib_name=args.calibpath)
+
+    if args.guide_stars:
+        # Initialize the global guide star Gaussian mixture model.
+        global GMM
+        psf_grid = np.arange(args.psf_pixels + 1) - args.psf_pixels / 2
+        GMM = GMMFit(psf_grid, psf_grid)
 
     if args.npool > 0:
         # Initialize multiprocessing.
