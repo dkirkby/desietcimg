@@ -93,7 +93,7 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31,
         ylo, yhi = iy - halfsize, iy + halfsize + 1
         xlo, xhi = ix - halfsize, ix + halfsize + 1
         if ylo < 0 or yhi > ny or xlo < 0 or xhi > nx:
-            print(f'Skipping stamp too close to border at ({x0},{y0})')
+            logging.info('Skipping stamp too close to border at ({0},{1})'.format(x0, y0))
             continue
         SY, SX = slice(ylo, yhi), slice(xlo, xhi)
         # Prepare a fiber template centered on the target position.
@@ -120,6 +120,12 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31,
 
 def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath=None, stars=None):
     """Process a single camera of a single exposure.
+
+    Returns
+        tuple or None
+            Returns None in case of an error, or a tuple (initial, frames) of results from processing
+            the initial image and any subsequent guiding frames (when giuding is True and stars is
+            not None).
     """
     global GFA
     with fitsio.FITS(str(inpath), mode='r') as hdus:
@@ -164,11 +170,13 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
                     ax[3].set_xlabel('{0} {1} Guide Exposure #'.format(camera, expid))
                     plt.savefig(framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
                     plt.clf()
-            result = GFA.psf_stack
+                result = GFA.psf_stack, (Dsum, WDsum, Msum, params)
+            else:
+                result = GFA.psf_stack, None
         else:
             GFA.get_donuts(iexp=0)
             stamps = GFA.donuts[0] + GFA.donuts[1]
-            result = GFA.donut_stack
+            result = GFA.donut_stack, None
         if framepath is not None:
             if not np.isscalar(exptime):
                 # Use values for the acquisition image of a guide sequence.
@@ -226,12 +234,8 @@ def process(inpath, args, pool=None, pool_timeout=5):
         stars = None
         if guiding:
             info = fitsio.read(str(inpath), ext=camera + 'T', columns=('EXPTIME', 'GCCDTEMP'))
-            logging.info('Processing {0} guide frames'.format(len(info)))
             if args.guide_stars:
                 stars = PlateMaker[PlateMaker['GFA_LOC'] == camera]
-                print(stars.dtype)
-                print(stars)
-                logging.info('Processing {0} guide stars'.format(len(stars)))
         else:
             info = fitsio.read_header(str(inpath), ext=camera)
         exptime = info['EXPTIME']
@@ -264,16 +268,18 @@ def process(inpath, args, pool=None, pool_timeout=5):
             'ADC1PHI', 'ADC2PHI', 'MOUNTHA', 'MOUNTAZ', 'MOUNTEL', 'MOUNTDEC')}
         hdus.write(np.zeros(1), header=meta)
         for camera in results:
+            # Retrieve the result of processing the initial image and any subsequent guide frames.
+            initial, frames = results[camera]
             if camera.startswith('GUIDE'):
-                hdus.write(np.stack(results[camera]).astype(np.float32), extname=camera)
+                hdus.write(np.stack(initial).astype(np.float32), extname=camera)
             else:
-                L, R = results[camera]
+                L, R = initial
                 if L is not None:
                     hdus.write(np.stack(L).astype(np.float32), extname=camera + 'L')
                 if R is not None:
                     hdus.write(np.stack(R).astype(np.float32), extname=camera + 'R')
-    # Produce a summary plot.
-    fig = plot_image_quality(results, meta)
+    # Produce a summary plot of the delivered image quality measured from the first image.
+    fig = plot_image_quality({camera: result[0] for camera, result in results.items()}, meta)
     # Save the summary plot.
     figpath = outpath / 'gfadiq_{0}.png'.format(expid)
     plt.savefig(figpath)
