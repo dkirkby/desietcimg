@@ -35,41 +35,39 @@ GMM = None
 rawbuf = np.empty((1, 1032, 2248), np.uint32)
 
 
-def process_guide_sequence(self, T, WT, GMM, stars, exptime, stampsize=25, maxdither=3, ndither=31,
+def process_guide_sequence(stars, exptime, maxdither=3, ndither=31,
                            zeropoint=27.06, fiber_diam_um=107, pixel_size_um=15):
     """
     """
-    print('process_guide_sequence')
-    #global GFA, GMM
-    return
+    global GFA, GMM
+    T, WT = GFA.psf_stack
+    stampsize = GMM.shape[0]
     assert stampsize % 2 == 1, 'stampsize must be odd'
     halfsize = stampsize // 2
     nstars = len(stars)
     if nstars <= 0:
-        print('No guide stars available')
+        logging.warning('No guide stars available')
         return
-    nexp, ny, nx = self.data.shape
-    print('nexp', nexp, 'nstars', nstars)
+    nexp, ny, nx = GFA.data.shape
+    if nexp <= 1:
+        logging.warning('No guide frames to process')
+        return
+    logging.info('Processing {0} guide exposures with {1} stars'.format(nexp, nstars))
     assert exptime.shape == (nexp,)
     nexp -= 1 # do not include the acquisition image.
-    if nexp <= 0:
-        print('No guide frames to process')
-        return
     exptime = exptime[1:]
     nT = len(T)
     assert T.shape == WT.shape == (nT, nT)
     # Trim the PSF to the stamp size to use for fitting.
     assert stampsize <= nT
     ntrim = (nT - stampsize) // 2
-    print('nT', nT, ntrim)
     S = slice(ntrim, ntrim + stampsize)
     T, WT = T[S, S], WT[S, S]
     # Fit the PSF to a Gaussian mixture model.
     params = GMM.fit(T, WT, ngauss=3)
     if params is None:
-        print('Unable to fit PSF model.')
+        logging.error('Unable to fit PSF model')
         return
-    print(params)
     # Prepare dithered fits.
     offsets = np.linspace(-maxdither, maxdither, ndither)
     dithered = GMM.dither(params, offsets)
@@ -77,9 +75,9 @@ def process_guide_sequence(self, T, WT, GMM, stars, exptime, stampsize=25, maxdi
     max_rsq = (0.5 * fiber_diam_um / pixel_size_um) ** 2
     profile = lambda x, y: 1.0 * (x ** 2 + y ** 2 < max_rsq)
     # Initialize stacked results.
-    Dsum = np.zeros((stampsize, stampsize))
-    WDsum = np.zeros((stampsize, stampsize))
-    Msum = np.zeros((stampsize, stampsize))
+    Dsum = np.zeros((nstars, stampsize, stampsize))
+    WDsum = np.zeros((nstars, stampsize, stampsize))
+    Msum = np.zeros((nstars, stampsize, stampsize))
     params = np.empty((nstars, nexp, 5))
     for istar in range(nstars):
         # Lookup the platemaker target coordinates and magnitude for this guide star.
@@ -102,11 +100,8 @@ def process_guide_sequence(self, T, WT, GMM, stars, exptime, stampsize=25, maxdi
         fiber = desietcimg.util.make_template(
             stampsize, profile, dx=x0 - ix, dy=y0 - iy, normalized=False)
         # Do not include the acquisition image.
-        Dframes = self.data[1:, SY, SX]
-        WDframes = self.ivar[1:, SY, SX]
-        Dsum[:] = 0
-        WDsum[:] = 0
-        Msum[:] = 0
+        Dframes = GFA.data[1:, SY, SX]
+        WDframes = GFA.ivar[1:, SY, SX]
         for iexp in range(nexp):
             D, WD = Dframes[iexp].copy(), WDframes[iexp].copy()
             # Estimate centroid, flux and constant background.
@@ -114,50 +109,26 @@ def process_guide_sequence(self, T, WT, GMM, stars, exptime, stampsize=25, maxdi
             # Calculate the flux fraction within the fiber aperture using the best-fit model.
             fiberfrac = np.sum(fiber * best_fit)
             # Accumulate this exposure.
-            Dsum += D * WD
-            WDsum += WD
-            Msum += flux * best_fit
+            Dsum[istar] += D * WD
+            WDsum[istar] += WD
+            Msum[istar] += flux * best_fit
             params[istar, iexp] = (dx, dy, flux / nelec_pred[iexp], fiberfrac, nll)
-        Dsum = np.divide(Dsum, WDsum, out=np.zeros_like(Dsum), where=WDsum > 0)
-
-        if istar == 0:
-            #fig, ax = desietcimg.plot.plot_data(Dsum, WDsum, downsampling=1, zoom=8)
-            plt.imshow(Dsum, interpolation='none', origin='lower')
-            plt.colorbar()
-            plt.show()
-            plt.imshow(Msum, interpolation='none', origin='lower')
-            plt.colorbar()
-            plt.show()
-        #ax.plot(params[:, 0] + halfsize, params[:, 1] + halfsize, 'rx', alpha=0.5)
-        #ax.plot(params[:, 2])
-        #plt.show()
-
-    fig, ax = plt.subplots(4, 1,  figsize=(12, 12), sharex=True)
-    for istar in range(nstars):
-        ax[0].plot(params[istar, :, 0], 'x-')
-        ax[0].plot(params[istar, :, 1], '+-')
-        ax[1].plot(params[istar, :, 2])
-        ax[2].plot(params[istar, :, 3])
-        ax[3].plot(params[istar, :, 4])
-    ax[0].set_ylabel('Centroid Offset [pix]')
-    ax[1].set_ylabel('Transparency')
-    ax[2].set_ylabel('Fiber Fraction')
-    ax[3].set_ylabel('Fit Min NLL')
-    ax[3].set_xlabel('Guide Exposure #')
+        Dsum[istar] = np.divide(
+            Dsum[istar], WDsum[istar], out=np.zeros_like(Dsum[istar]), where=WDsum[istar] > 0)
+    return Dsum, WDsum, Msum, params
 
 
 def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath=None, stars=None):
     """Process a single camera of a single exposure.
     """
     global GFA
-    guide_analysis_stampsize = 25
     with fitsio.FITS(str(inpath), mode='r') as hdus:
         if camera not in hdus:
             logging.error('Missing HDU {0}'.format(camera))
             return None
         logging.info('Processing {0}'.format(camera))
         if guiding and stars is not None:
-            # Read all exposures.
+            # Process all exposures.
             raw = hdus[camera][:, :, :]
         else:
             if guiding:
@@ -174,16 +145,34 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
             return None
         GFA.data -= GFA.get_dark_current(ccdtemp, exptime)
         if camera.startswith('GUIDE'):
-            GFA.get_psfs()
+            GFA.get_psfs(iexp=0)
             stamps = GFA.psfs
             if stars is not None:
-                process_guide_sequence(GFA, *GFA.psf_stack, GMM, stars, exptime, stampsize=guide_analysis_stampsize)
+                Dsum, WDsum, Msum, params = process_guide_sequence(stars, exptime)
+                if framepath is not None:
+                    fig, ax = plt.subplots(4, 1,  figsize=(12, 12), sharex=True)
+                    for P in params:
+                        ax[0].plot(P[:, 0], 'x-')
+                        ax[0].plot(P[:, 1], '+-')
+                        ax[1].plot(P[:, 2])
+                        ax[2].plot(P[:, 3])
+                        ax[3].plot(P[:, 4])
+                    ax[0].set_ylabel('Centroid Offset [pix]')
+                    ax[1].set_ylabel('Transparency')
+                    ax[2].set_ylabel('Fiber Fraction')
+                    ax[3].set_ylabel('Fit Min NLL')
+                    ax[3].set_xlabel('{0} {1} Guide Exposure #'.format(camera, expid))
+                    plt.savefig(framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
+                    plt.clf()
             result = GFA.psf_stack
         else:
-            GFA.get_donuts()
+            GFA.get_donuts(iexp=0)
             stamps = GFA.donuts[0] + GFA.donuts[1]
             result = GFA.donut_stack
         if framepath is not None:
+            if not np.isscalar(exptime):
+                # Use values for the acquisition image of a guide sequence.
+                exptime, ccdtemp = exptime[0], ccdtemp[0]
             label = '{0} {1} {2:.1f}s {3:.1f}C'.format(night, expid, exptime, ccdtemp)
             plot_data(GFA.data[0], GFA.ivar[0], downsampling=2, label=label, stamps=stamps, colorhist=True)
             plt.savefig(framepath / '{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
