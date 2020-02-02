@@ -278,6 +278,10 @@ def process(inpath, args, pool=None, pool_timeout=5):
                     hdus.write(np.stack(L).astype(np.float32), extname=camera + 'L')
                 if R is not None:
                     hdus.write(np.stack(R).astype(np.float32), extname=camera + 'R')
+            if frames  is not None:
+                (Dsum, WDsum, Msum, params) = frames
+                hdus.write(np.stack((Dsum, WDsum, Msum)).astype(np.float32), extname=camera + 'G')
+                hdus.write(params.astype(np.float32), extname=camera + 'P')
     # Produce a summary plot of the delivered image quality measured from the first image.
     fig = plot_image_quality({camera: result[0] for camera, result in results.items()}, meta)
     # Save the summary plot.
