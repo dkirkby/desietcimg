@@ -154,8 +154,9 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
             GFA.get_psfs(iexp=0)
             stamps = GFA.psfs
             if stars is not None:
-                Dsum, WDsum, Msum, params = process_guide_sequence(stars, exptime)
-                if framepath is not None:
+                stars_result = process_guide_sequence(stars, exptime)
+                if stars_result is not None and framepath is not None:
+                    Dsum, WDsum, Msum, params = stars_result
                     fig, ax = plt.subplots(4, 1,  figsize=(12, 12), sharex=True)
                     for P in params:
                         ax[0].plot(P[:, 0], 'x-')
@@ -170,7 +171,7 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
                     ax[3].set_xlabel('{0} {1} Guide Exposure #'.format(camera, expid))
                     plt.savefig(framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
                     plt.clf()
-                result = GFA.psf_stack, (Dsum, WDsum, Msum, params)
+                result = GFA.psf_stack, stars_result
             else:
                 result = GFA.psf_stack, None
         else:
@@ -183,7 +184,7 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
                 exptime, ccdtemp = exptime[0], ccdtemp[0]
             label = '{0} {1} {2:.1f}s {3:.1f}C'.format(night, expid, exptime, ccdtemp)
             plot_data(GFA.data[0], GFA.ivar[0], downsampling=2, label=label, stamps=stamps, colorhist=True)
-            plt.savefig(framepath / '{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
+            plt.savefig(framepath / 'frame_{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
             plt.clf()
         return result
 
@@ -218,7 +219,7 @@ def process(inpath, args, pool=None, pool_timeout=5):
     outpath = args.outpath / night / expid
     outpath.mkdir(parents=True, exist_ok=True)
     # Are there already existing outputs?
-    fitspath = outpath / 'stack_{0}.fits'.format(expid)
+    fitspath = outpath / 'gfaetc_{0}.fits'.format(expid)
     if fitspath.exists() and not args.overwrite:
         logging.info('Will not overwrite outputs in {0}'.format(outpath))
         return
