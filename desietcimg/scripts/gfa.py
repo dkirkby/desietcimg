@@ -214,7 +214,11 @@ def process(inpath, args, pool=None, pool_timeout=5):
         return
     if guiding and args.guide_stars:
         assert GMM is not None, 'GMM not initialized.'
-        PlateMaker = fitsio.read(str(inpath), ext='PMGSTARS')
+        try:
+            PlateMaker = fitsio.read(str(inpath), ext='PMGSTARS')
+        except IOError as e:
+            logging.warn('PMGSTARS extension not found so ignoring --guide-stars')
+            args.guide_stars = False
     # Prepare the output path.
     outpath = args.outpath / night / expid
     outpath.mkdir(parents=True, exist_ok=True)
