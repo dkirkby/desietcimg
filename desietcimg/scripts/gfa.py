@@ -153,7 +153,7 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
         if camera.startswith('GUIDE'):
             GFA.get_psfs(iexp=0)
             stamps = GFA.psfs
-            if stars is not None:
+            if GFA.psf_stack[0] is not None and stars is not None:
                 stars_result = process_guide_sequence(stars, exptime)
                 if stars_result is not None and framepath is not None:
                     Dsum, WDsum, Msum, params = stars_result
