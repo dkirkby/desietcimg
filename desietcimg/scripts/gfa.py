@@ -192,6 +192,7 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
 def process(inpath, args, pool=None, pool_timeout=5):
     """Process a single GFA exposure.
     """
+    global GFA
     if not inpath.exists():
         logging.error('Non-existant path: {0}'.format(inpath))
         return
@@ -232,6 +233,9 @@ def process(inpath, args, pool=None, pool_timeout=5):
     results = {}
     framepath = outpath if args.save_frames else None
     for camera in cameras.split(','):
+        if camera not in GFA.gfa_names:
+            logging.warning('Ignoring invalid camera name in header: "{0}".'.format(camera))
+            continue
         if guiding and camera.startswith('FOCUS'):
             # Guiding exposures do not record FOCUS data.
             continue
