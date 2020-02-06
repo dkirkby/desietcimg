@@ -211,7 +211,9 @@ class GFACamera(object):
             'F': raw[:, :self.nampy, -1:-(self.nxby2+1):-1], # bottom right
             'G': raw[:, -1:-(self.nampy + 1):-1, -1:-(self.nxby2+1):-1], # top right
         }
-        assert all((self.amps[ampname].base is raw for ampname in self.amp_names))
+        # Verify that no data was copied.
+        raw_base = raw if raw.base is None else raw.base
+        assert all((self.amps[ampname].base is raw_base for ampname in self.amp_names))
         # Calculate bias as mean overscan in each exposure, ignoring the first nrowtrim rows
         # (in readout order) and any values > maxdelta from the per-exposure median overscan.
         # Since we use a mean rather than median, subtracting this bias changes the dtype from
