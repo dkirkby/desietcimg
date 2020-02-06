@@ -281,7 +281,7 @@ def process(inpath, args, pool=None, pool_timeout=5):
     # Save the output FITS file.
     with fitsio.FITS(str(fitspath), 'rw', clobber=True) as hdus:
         meta = {k: hdr.get(k) for k in (
-            'NIGHT', 'EXPID', 'MJD-OBS', 'EXPTIME', 'HEXPOS', 'TRUSTEMP',
+            'NIGHT', 'EXPID', 'MJD-OBS', 'EXPTIME', 'PROGRAM', 'HEXPOS', 'TRUSTEMP',
             'ADC1PHI', 'ADC2PHI', 'MOUNTHA', 'MOUNTAZ', 'MOUNTEL', 'MOUNTDEC')}
         hdus.write(np.zeros(1), header=meta)
         for camera in results:

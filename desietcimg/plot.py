@@ -549,7 +549,7 @@ def plot_distance_matrix(stamps, cmap='magma', masked_color='cyan', dpi=100, max
     plot_stamp(Dstack, Wstack, ax, 'stack')
 
 
-def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolation='none'):
+def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolation='none', maxline=17):
     # Calculate crops to use, without assuming which cameras are present in stacks.
     gsize, fsize = 0, 0
     for name, stack in stacks.items():
@@ -660,14 +660,28 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
             verticalalignment='bottom', horizontalalignment='center', fontweight='bold')
     ax.text(0.5, 0.6, '{0:08d}'.format(meta['EXPID']), transform=ax.transAxes, fontsize=16, color='k',
             verticalalignment='bottom', horizontalalignment='center', fontweight='bold')
+    if 'PROGRAM' in meta:
+        line1 = meta['PROGRAM'].strip()
+        if len(line1) > maxline:
+            line2 = line1[maxline:2 * maxline].strip()
+            line1 = line1[:maxline].strip()
+            y = 0.5
+        else:
+            y = 0.46
+            line2 = None
+        ax.text(0.5, y, line1, transform=ax.transAxes, fontsize=8, color='gray',
+                verticalalignment='bottom', horizontalalignment='center')
+        if line2 is not None:
+            ax.text(0.5, y - 0.08, line2, transform=ax.transAxes, fontsize=8, color='gray',
+                    verticalalignment='bottom', horizontalalignment='center')
     if 'MJD-OBS' in meta:
         localtime = datetime.datetime(2019, 1, 1) + datetime.timedelta(days=meta['MJD-OBS'] - 58484.0, hours=-7)
-        ax.text(0.5, 0.4, localtime.strftime('%H:%M:%S'), transform=ax.transAxes, fontsize=14, color='k',
+        ax.text(0.5, 0.26, localtime.strftime('%H:%M:%S'), transform=ax.transAxes, fontsize=12, color='k',
                 verticalalignment='bottom', horizontalalignment='center')
-        ax.text(0.5, 0.3, 'local', transform=ax.transAxes, fontsize=10, color='gray',
+        ax.text(0.5, 0.17, 'local', transform=ax.transAxes, fontsize=8, color='gray',
                 verticalalignment='bottom', horizontalalignment='center')
     if 'EXPTIME' in meta:
-        ax.text(0.5, 0.1, '{0:.1f}s'.format(meta['EXPTIME']), transform=ax.transAxes, fontsize=14, color='k',
+        ax.text(0.5, 0.01, '{0:.1f}s'.format(meta['EXPTIME']), transform=ax.transAxes, fontsize=12, color='k',
                 verticalalignment='bottom', horizontalalignment='center')
     # Add airmass/alt, az?
 
