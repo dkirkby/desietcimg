@@ -482,7 +482,7 @@ def gfadiq():
         # Find the existing exposures on this night.
         existing = get_gfa_exposures(args.inpath, args.checkpath, args.night)
         if args.batch:
-            for path in existing:
+            for path in sorted(existing):
                 process(path, args, pool)
         if args.watch:
             logging.info('Watching for new exposures...hit ^C to exit')
