@@ -490,7 +490,7 @@ def gfadiq():
                 while True:
                     time.sleep(args.watch_interval)
                     newexp = get_gfa_exposures(args.inpath, args.checkpath, args.night) - existing
-                    for path in newexp:
+                    for path in sorted(newexp):
                         process(path, args, pool)
                     existing |= newexp
             except KeyboardInterrupt:
