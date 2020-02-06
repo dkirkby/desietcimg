@@ -199,15 +199,23 @@ def process(inpath, args, pool=None, pool_timeout=5):
     # Is this a guiding exposure?
     guiding = inpath.name.startswith('guide')
     # Lookup the NIGHT, EXPID, EXPTIME from the primary header.
-    hdr = fitsio.read_header(str(inpath), ext='GUIDER' if guiding else 'GFA')
+    hdr_ext = 'GUIDER' if guiding else 'GFA'
+    hdr = fitsio.read_header(str(inpath), ext=hdr_ext)
     for k in 'NIGHT', 'EXPID', 'EXPTIME':
         if k not in hdr:
             logging.info('Skipping exposure with missing {0}: {1}'.format(k, inpath))
             return
-    cameras = hdr.get('ACQCAM' if guiding else 'IMAGECAM')
+    cameras_key = 'ACQCAM' if guiding else 'IMAGECAM'
+    cameras = hdr.get(cameras_key)
     if cameras is None:
-        logging.info('Skipping exposure with missing ACQCAM/IMAGECAM: {0}'.format(inpath))
+        logging.info('Skipping exposure with missing {0}/{1}: {2}'
+                     .format(hdr_ext, cameras_key, inpath))
         return
+    if cameras == 'GUIDE0,FOCUS1,GUIDE2,GUIDE3,FOCUS4,GUIDE5,FOCUS6,GUIDE7,GUIDE8,FOCUS':
+        # The full lists of 10 cameras exceeds the 71-char max length in the FITS standard.
+        # https://heasarc.gsfc.nasa.gov/docs/software/fitsio/c/c_user/node20.html
+        logging.warning('Patching {0}/{1} keyword value.'.format(hdr_ext, cameras_key))
+        cameras = 'GUIDE0,FOCUS1,GUIDE2,GUIDE3,FOCUS4,GUIDE5,FOCUS6,GUIDE7,GUIDE8,FOCUS9'
     night = str(hdr['NIGHT'])
     expid = '{0:08d}'.format(hdr['EXPID'])
     if hdr['EXPTIME'] == 0:
