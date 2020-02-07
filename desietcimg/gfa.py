@@ -505,7 +505,10 @@ def load_guider_centroids(path, expid):
             expected[camera][istar, 1] = S['x_expected']
         # Get the combined centroid sent to the telescope for each frame.
         for iframe in range(nframes):
-            F = D['frames'][str(iframe + 1)]
+            F = D['frames'].get(str(iframe + 1))
+            if F is None:
+                log.warning('Missing frame {0}/{1} in {2}'.format(iframe + 1, nframes, jsonpath))
+                continue
             combined[camera][0, iframe] = F['combined_y']
             combined[camera][1, iframe] = F['combined_x']
             # Get the measured centroids for each guide star in this frame.

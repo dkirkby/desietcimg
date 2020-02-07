@@ -190,9 +190,10 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
                 # Use values for the acquisition image of a guide sequence.
                 exptime, ccdtemp = exptime[0], ccdtemp[0]
             label = '{0} {1} {2:.1f}s {3:.1f}C'.format(night, expid, exptime, ccdtemp)
-            plot_data(GFA.data[0], GFA.ivar[0], downsampling=2, label=label, stamps=stamps, colorhist=True)
+            fig, ax = plot_data(GFA.data[0], GFA.ivar[0], downsampling=2, label=label,
+                                stamps=stamps, colorhist=True)
             plt.savefig(framepath / 'frame_{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
-            plt.clf()
+            plt.close(fig)
         return result
 
 
