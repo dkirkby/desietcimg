@@ -81,13 +81,17 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31,
     params = np.empty((nstars, nexp, 5))
     for istar in range(nstars):
         # Lookup the platemaker target coordinates and magnitude for this guide star.
-        y0, x0, rmag = stars[istar]['ROW'], stars[istar]['COL'], stars[istar]['MAG']
+        x0, y0, rmag = stars[istar]
         # Convert from PlateMaker indexing convention to (0,0) centered in bottom-left pixel.
         y0 -= 0.5
         x0 -= 0.5
-        # Convert rflux to predicted detected electrons with
-        # perfect atmospheric transmission and fiber acceptance.
-        nelec_pred = 10 ** (-(rmag - zeropoint) / 2.5) * exptime
+        if rmag == 0:
+            # rmag == 0 indicates that we have no magnitude info.
+            nelec_pred = 0
+        else:
+            # Convert rflux to predicted detected electrons with
+            # perfect atmospheric transmission and fiber acceptance.
+            nelec_pred = 10 ** (-(rmag - zeropoint) / 2.5) * exptime
         # Build a stamp centered on these coordinates.
         iy, ix = np.round(y0).astype(int), np.round(x0).astype(int)
         ylo, yhi = iy - halfsize, iy + halfsize + 1
@@ -106,6 +110,9 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31,
             D, WD = Dframes[iexp].copy(), WDframes[iexp].copy()
             # Estimate centroid, flux and constant background.
             dx, dy, flux, bg, nll, best_fit = GMM.fit_dithered(offsets, dithered, D, WD)
+            if iexp == 0 and np.all(nelec_pred == 0):
+                # Use the first measured flux as the reference value for transparency.
+                nelec_pred = flux * exptime / exptime[0]
             # Calculate the flux fraction within the fiber aperture using the best-fit model.
             fiberfrac = np.sum(fiber * best_fit)
             # Accumulate this exposure.
@@ -223,10 +230,32 @@ def process(inpath, args, pool=None, pool_timeout=5):
         return
     if guiding and args.guide_stars:
         assert GMM is not None, 'GMM not initialized.'
+        PlateMaker, GuiderExpected = None, None
+        try:
+            GuiderExpected, _, _ = desietcimg.gfa.load_guider_centroids(inpath.parent, expid)
+        except ValueError:
+            logging.warning('Guider centroids json file not readable.')
         try:
             PlateMaker = fitsio.read(str(inpath), ext='PMGSTARS')
         except IOError as e:
-            logging.warn('PMGSTARS extension not found so ignoring --guide-stars')
+            logging.warning('PMGSTARS extension not found.')
+        if PlateMaker is not None:
+            # Use PlateMaker (row, col) for expected positions of each guide star.
+            stars_expected = {}
+            for camera in np.unique(PlateMaker['GFA_LOC']):
+                stars = PlateMaker[PlateMaker['GFA_LOC'] == camera]
+                stars_expected[camera] = np.array((stars['COL'], stars['ROW'], stars['MAG'])).T
+        elif GuiderExpected is not None:
+            # Fall back to guider centroids.  I assume the JSON files uses the same coordinate
+            # convention as PlateMaker since it copies the PlateMaker values when both are present.
+            stars_expected = {}
+            for camera in GuiderExpected:
+                nstars = len(GuiderExpected[camera])
+                if nstars > 0:
+                    stars_expected[camera] = np.array(
+                        (GuiderExpected[camera][:, 0], GuiderExpected[camera][:, 1], np.zeros(nstars))).T
+        else:
+            logging.warning('Disabling --guide-stars option.')
             args.guide_stars = False
     # Prepare the output path.
     outpath = args.outpath / night / expid
@@ -252,7 +281,7 @@ def process(inpath, args, pool=None, pool_timeout=5):
         if guiding:
             info = fitsio.read(str(inpath), ext=camera + 'T', columns=('EXPTIME', 'GCCDTEMP'))
             if args.guide_stars:
-                stars = PlateMaker[PlateMaker['GFA_LOC'] == camera]
+                stars = stars_expected.get(camera)
         else:
             info = fitsio.read_header(str(inpath), ext=camera)
         exptime = info['EXPTIME']

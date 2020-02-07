@@ -1,6 +1,7 @@
 """Guide Focus Array (GFA) Utilities
 """
 import logging
+import json
 
 import numpy as np
 
@@ -464,10 +465,12 @@ class GFASourceMeasure(object):
         return (yslice, xslice, d, w)
 
 
-def load_guider_centroids(night, expid):
+def load_guider_centroids(path, expid):
     """Attempt to read the centroids json file produced by the guider.
 
-    Extracts numbers from the json file into numpy arrays.
+    Extracts numbers from the json file into numpy arrays. Note that
+    the json file uses "x" for rows and "y" for columns, which we map
+    to indices 0 and 1, respectively.
 
     Returns
     -------
@@ -480,11 +483,8 @@ def load_guider_centroids(night, expid):
         the centroid values are np.nan.
     """
     cameras = ('GUIDE0', 'GUIDE2', 'GUIDE3', 'GUIDE5', 'GUIDE7', 'GUIDE8')
-    ROOT = Path('/project/projectdirs/desi/spectro/data/')
-    night = str(night)
-    expid = f'{expid:08d}'
     # Read the json file of guider outputs.
-    jsonpath = ROOT / night / expid / f'centroids-{expid}.json'
+    jsonpath = path / 'centroids-{0}.json'.format(expid)
     if not jsonpath.exists():
         raise ValueError('Non-existent path: {0}.'.format(jsonpath))
     with open(jsonpath) as f:
@@ -501,16 +501,16 @@ def load_guider_centroids(night, expid):
         # Get the expected position for each guide star.
         for istar in range(stars[camera]):
             S = frame0.get(camera + f'_{istar}')
-            expected[camera][istar, 0] = S['x_expected']
-            expected[camera][istar, 1] = S['y_expected']
+            expected[camera][istar, 0] = S['y_expected']
+            expected[camera][istar, 1] = S['x_expected']
         # Get the combined centroid sent to the telescope for each frame.
         for iframe in range(nframes):
             F = D['frames'][str(iframe + 1)]
-            combined[camera][0, iframe] = F['combined_x']
-            combined[camera][1, iframe] = F['combined_y']
+            combined[camera][0, iframe] = F['combined_y']
+            combined[camera][1, iframe] = F['combined_x']
             # Get the measured centroids for each guide star in this frame.
             for istar in range(stars[camera]):
                 S = F.get(camera + '_{0}'.format(istar))
-                centroid[camera][istar, 0, iframe] = S.get('x_centroid', np.nan)
-                centroid[camera][istar, 1, iframe] = S.get('y_centroid', np.nan)
+                centroid[camera][istar, 0, iframe] = S.get('y_centroid', np.nan)
+                centroid[camera][istar, 1, iframe] = S.get('x_centroid', np.nan)
     return expected, combined, centroid
