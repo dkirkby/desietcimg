@@ -177,7 +177,7 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
                     ax[3].set_ylabel('Fit Min NLL')
                     ax[3].set_xlabel('{0} {1} Guide Exposure #'.format(camera, expid))
                     plt.savefig(framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
-                    plt.clf()
+                    plt.close(fig)
                 result = GFA.psf_stack, stars_result
             else:
                 result = GFA.psf_stack, None
