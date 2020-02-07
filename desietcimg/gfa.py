@@ -2,6 +2,7 @@
 """
 import logging
 import json
+import logging
 
 import numpy as np
 
@@ -507,7 +508,7 @@ def load_guider_centroids(path, expid):
         for iframe in range(nframes):
             F = D['frames'].get(str(iframe + 1))
             if F is None:
-                log.warning('Missing frame {0}/{1} in {2}'.format(iframe + 1, nframes, jsonpath))
+                logging.warning('Missing frame {0}/{1} in {2}'.format(iframe + 1, nframes, jsonpath))
                 continue
             combined[camera][0, iframe] = F['combined_y']
             combined[camera][1, iframe] = F['combined_x']
