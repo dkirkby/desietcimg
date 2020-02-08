@@ -783,3 +783,51 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
             ax.plot([-u, v, 6 * u, -v, -u], [-v, -u, 6 * v, u, -v], 'c-', lw=2)
 
     return fig
+
+
+def plot_guide_stars(Dsum, WDsum, Msum, params, night, expid, camera, maxdxy=5):
+    """Plot guide star analysis results.
+    """
+    fig, ax = plt.subplots(5, 1,  figsize=(12, 15), sharex=True)
+    nstars, nframes = params.shape[:2]
+    t = np.arange(nframes)
+    # Conversion from pix to mas.
+    conv = 1e3 * 15 / 70.54
+    for P in params:
+        x, y = P[:, 0], P[:, 1]
+        x0, y0 = np.median(x), np.median(y)
+        # Fit and plot straight lines to model the trend.
+        xsel = np.abs(x - x0) < maxdxy
+        ysel = np.abs(y - y0) < maxdxy
+        p1x, p0x = np.polyfit(t[xsel], x[xsel], deg=1)
+        p1y, p0y = np.polyfit(t[ysel], y[ysel], deg=1)
+        # Plot relative to the median values.
+        xfit = p0x + t * p1x
+        yfit = p0y + t * p1y
+        line2d = ax[0].plot(t, xfit, '-', lw=2, alpha=0.5)
+        c=line2d[0].get_color()
+        ax[1].plot(t, yfit, '-', lw=2, alpha=0.5, c=c)
+        # Calculate std dev relative to the linear trend converted to mas.
+        xstd = conv * np.std(x[xsel] - xfit[xsel])
+        ystd = conv * np.std(y[xsel] - yfit[xsel])
+        # Plot per-frame centroids labeled with std dev.
+        ax[0].plot(t, x, '.', c=c, label='std={0:.1f} mas'.format(xstd))
+        ax[1].plot(t, y, '.', c=c, label='std={0:.1f} mas'.format(ystd))
+        ax[2].plot(P[:, 2], c=c)
+        ax[3].plot(P[:, 3], c=c)
+        ax[4].plot(P[:, 4], c=c)
+    ax[0].legend(ncol=nstars)
+    ax[1].legend(ncol=nstars)
+    ax[0].set_ylim(-maxdxy, +maxdxy)
+    ax[1].set_ylim(-maxdxy, +maxdxy)
+    ax[0].set_ylabel('dX [pix]', fontsize=12)
+    ax[1].set_ylabel('dY [pix]', fontsize=12)
+    ax[2].set_ylabel('Transparency', fontsize=12)
+    ax[3].set_ylabel('Fiber Fraction', fontsize=12)
+    ax[4].set_ylabel('Fit Min NLL', fontsize=12)
+    ax[4].set_yscale('log')
+    ax[4].set_ylim(0.1, 100)
+    ax[4].set_xlabel('{0} {1} {2} Frame #'.format(night, expid, camera), fontsize=14)
+    ax[4].set_xlim(-1.5, nframes + 0.5)
+    plt.subplots_adjust(0.07, 0.04, 0.99, 0.99, hspace=0.03)
+    return fig, ax

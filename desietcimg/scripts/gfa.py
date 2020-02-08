@@ -165,18 +165,7 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
                 stars_result = process_guide_sequence(stars, exptime)
                 if stars_result is not None and framepath is not None:
                     Dsum, WDsum, Msum, params = stars_result
-                    fig, ax = plt.subplots(4, 1,  figsize=(12, 12), sharex=True)
-                    for P in params:
-                        ax[0].plot(P[:, 0], 'x-')
-                        ax[0].plot(P[:, 1], '+-')
-                        ax[1].plot(P[:, 2])
-                        ax[2].plot(P[:, 3])
-                        ax[3].plot(P[:, 4])
-                    ax[0].set_ylabel('Centroid Offset [pix]')
-                    ax[1].set_ylabel('Transparency')
-                    ax[2].set_ylabel('Fiber Fraction')
-                    ax[3].set_ylabel('Fit Min NLL')
-                    ax[3].set_xlabel('{0} {1} Guide Exposure #'.format(camera, expid))
+                    fig, ax = desietcimg.plot.plot_guide_stars(Dsum, WDsum, Msum, params, night, expid, camera)
                     plt.savefig(framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
                     plt.close(fig)
                 result = GFA.psf_stack, stars_result
