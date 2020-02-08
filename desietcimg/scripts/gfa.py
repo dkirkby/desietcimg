@@ -363,7 +363,7 @@ def gfadiq():
     parser.add_argument('--night', type=int, metavar='YYYYMMDD',
         help='Night of exposure to process in the format YYYYMMDD')
     parser.add_argument('--expid', type=str, metavar='N',
-        help='Exposure(s) to process specified as N or N1-N2')
+        help='Exposure(s) to process specified as N or N1-N2 or N1,N2-N3 etc')
     parser.add_argument('--batch', action='store_true',
         help='Process all existing exposures on night')
     parser.add_argument('--watch', action='store_true',
@@ -490,17 +490,20 @@ def gfadiq():
         pool = None
 
     if args.expid is not None:
-        # Process an argument of the form N or N1-N2.
-        limits = [int(expid) for expid in args.expid.split('-')]
-        if len(limits) == 1:
-            start, stop = limits[0], limits[0] + 1
-        elif len(limits) == 2:
-            start, stop = limits[0], limits[1] + 1
-        else:
-            print('Invalid --expid (should be N or N1-N2): "{0}"'.format(args.expid))
-            sys.exit(-1)
-        exposures = get_gfa_exposures(args.inpath, args.checkpath, args.night, start, stop)
-        for path in exposures:
+        exposures = set()
+        # Loop over comma-separated tokens.
+        for token in args.expid.split(','):
+            # Process a token of the form N or N1-N2.
+            limits = [int(expid) for expid in token.split('-')]
+            if len(limits) == 1:
+                start, stop = limits[0], limits[0] + 1
+            elif len(limits) == 2:
+                start, stop = limits[0], limits[1] + 1
+            else:
+                print('Invalid --expid (should be N or N1-N2): "{0}"'.format(args.expid))
+                sys.exit(-1)
+            exposures |= get_gfa_exposures(args.inpath, args.checkpath, args.night, start, stop)
+        for path in sorted(exposures):
             process(path, args, pool)
         return
 
