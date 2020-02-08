@@ -36,7 +36,7 @@ GMM = None
 rawbuf = np.empty((1, 1032, 2248), np.uint32)
 
 
-def process_guide_sequence(stars, exptime, maxdither=3, ndither=31,
+def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2,
                            zeropoint=27.06, fiber_diam_um=107, pixel_size_um=15):
     """
     """
@@ -69,8 +69,10 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31,
     if params is None:
         logging.error('Unable to fit PSF model')
         return
-    # Prepare dithered fits.
-    offsets = np.linspace(-maxdither, maxdither, ndither)
+    # Prepare dithered fits. The zoom parameter controls the spacing at the center
+    # of the grid relative to the outside, which increases linearly.
+    t = np.linspace(-1, +1, ndither)
+    offsets = 2 * maxdither / (zoomdither + 1) * t * (1 + 0.5 * (zoomdither - 1) * np.abs(t))
     dithered = GMM.dither(params, offsets)
     # Initialize fiber templates for each guide star target centroid.
     max_rsq = (0.5 * fiber_diam_um / pixel_size_um) ** 2
@@ -374,9 +376,9 @@ def gfadiq():
         help='Save images of each GFA frame')
     parser.add_argument('--guide-stars', action='store_true',
         help='Measure guide stars in each frame of any guiding sequences')
-    parser.add_argument('--max-dither', type=float, default=3,
+    parser.add_argument('--max-dither', type=float, default=5,
         help='Maximum dither in pixels to use for guide star fits')
-    parser.add_argument('--num-dither', type=int, default=31,
+    parser.add_argument('--num-dither', type=int, default=40,
         help='Number of dithers to use between (-max,+max)')
     parser.add_argument('--psf-pixels', type=int, default=25,
         help='Size of PSF stamp to use for guide star measurements')
