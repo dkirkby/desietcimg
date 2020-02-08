@@ -126,7 +126,8 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31,
     return Dsum, WDsum, Msum, params
 
 
-def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath=None, stars=None):
+def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath,
+                stars, maxdither, ndither):
     """Process a single camera of a single exposure.
 
     Returns
@@ -162,7 +163,7 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
             GFA.get_psfs(iexp=0)
             stamps = GFA.psfs
             if GFA.psf_stack[0] is not None and stars is not None:
-                stars_result = process_guide_sequence(stars, exptime)
+                stars_result = process_guide_sequence(stars, exptime, maxdither=maxdither, ndither=ndither)
                 if stars_result is not None and framepath is not None:
                     Dsum, WDsum, Msum, params = stars_result
                     fig, ax = desietcimg.plot.plot_guide_stars(Dsum, WDsum, Msum, params, night, expid, camera)
@@ -277,15 +278,16 @@ def process(inpath, args, pool=None, pool_timeout=5):
             info = fitsio.read_header(str(inpath), ext=camera)
         exptime = info['EXPTIME']
         ccdtemp = info['GCCDTEMP']
+        process_args = (inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath,
+                        stars, args.max_dither, args.num_dither)
         if pool is None:
-            result = process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath, stars)
+            result = process_one(*process_args)
             if result is None:
                 logging.error('Error processing HDU {0}'.format(camera))
             else:
                 results[camera] = result
         else:
-            results[camera] = pool.apply_async(
-                process_one, (inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath, stars))
+            results[camera] = pool.apply_async(process_one, process_args)
     if pool:
         # Collect the pooled results.
         for camera in results:
@@ -372,6 +374,10 @@ def gfadiq():
         help='Save images of each GFA frame')
     parser.add_argument('--guide-stars', action='store_true',
         help='Measure guide stars in each frame of any guiding sequences')
+    parser.add_argument('--max-dither', type=float, default=3,
+        help='Maximum dither in pixels to use for guide star fits')
+    parser.add_argument('--num-dither', type=int, default=31,
+        help='Number of dithers to use between (-max,+max)')
     parser.add_argument('--psf-pixels', type=int, default=25,
         help='Size of PSF stamp to use for guide star measurements')
     parser.add_argument('--overwrite', action='store_true',
