@@ -935,3 +935,41 @@ def ADCangles(EL, HA, DEC, LAT=31.963972222):
     ADC1 = HORIZON + (0.0353 + tanZ * (0.2620 + tanZ * 0.3563))
     ADC2 = HORIZON - (0.0404 + tanZ * (0.2565 + tanZ * 0.3576))
     return np.rad2deg([P, ADC1, ADC2])
+
+
+def diskgrid(n, radius=1, alpha=2):
+    """Distribute points over a disk with increasing density towards the center.
+
+    Points are locally uniformly distributed according to the sunflower pattern
+    https://demonstrations.wolfram.com/SunflowerSeedArrangements/
+
+    A non-linear transformation of the radial coordinate controlled by alpha
+    increases the density of points towards the center. Use alpha=0 for
+    uniform density.
+
+    Parameters
+    ----------
+    n : int
+        Total number of points to use in the grid.
+    radius : float
+        Radius of the disk to fill.
+    alpha : float
+        Parameter controlling the increase of density towards the center of
+        the disk, with alpha=0 corresponding to no increase.
+
+    Returns
+    -------
+    tuple
+        Tuple (x, y) of 2D points covering the disk.
+    """
+    # Golden ratio.
+    phi = 0.5 * (np.sqrt(5) + 1)
+    # Calculate coordinates of each point to uniformly fill the unit disk.
+    k = np.arange(1, n + 1)
+    theta = 2 * np.pi * k / phi ** 2
+    r = np.sqrt((k - 0.5) / (n - 0.5))
+    # Transform r to increase the density towards the center.
+    if alpha > 0:
+        r = (np.exp(alpha * r) - 1) / (np.exp(alpha) - 1)
+    r *= radius
+    return r * np.cos(theta), r * np.sin(theta)
