@@ -811,6 +811,8 @@ def plot_guide_stars(Dsum, WDsum, Msum, params, night, expid, camera, maxdxy=5):
         xstd = conv * np.std(x[xsel] - xfit[xsel])
         ystd = conv * np.std(y[xsel] - yfit[xsel])
         # Plot per-frame centroids labeled with std dev.
+        ax[0].plot(t, x, '-', c=c, alpha=0.5)
+        ax[1].plot(t, y, '-', c=c, alpha=0.5)
         ax[0].plot(t, x, '.', c=c, label='std={0:.1f} mas'.format(xstd))
         ax[1].plot(t, y, '.', c=c, label='std={0:.1f} mas'.format(ystd))
         ax[2].plot(P[:, 2], c=c)
@@ -825,6 +827,8 @@ def plot_guide_stars(Dsum, WDsum, Msum, params, night, expid, camera, maxdxy=5):
     ax[2].set_ylabel('Transparency', fontsize=12)
     ax[3].set_ylabel('Fiber Fraction', fontsize=12)
     ax[4].set_ylabel('Fit Min NLL', fontsize=12)
+    ax[2].set_ylim(-0.1, 1.1)
+    ax[3].set_ylim(-0.1, 1.1)
     ax[4].set_yscale('log')
     ax[4].set_ylim(0.1, 100)
     ax[4].set_xlabel('{0} {1} {2} Frame #'.format(night, expid, camera), fontsize=14)

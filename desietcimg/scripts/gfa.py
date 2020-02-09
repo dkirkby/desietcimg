@@ -375,7 +375,7 @@ def gfadiq():
         help='Measure guide stars in each frame of any guiding sequences')
     parser.add_argument('--max-dither', type=float, default=7,
         help='Maximum dither in pixels to use for guide star fits')
-    parser.add_argument('--num-dither', type=int, default=1500,
+    parser.add_argument('--num-dither', type=int, default=1200,
         help='Number of dithers to use between (-max,+max)')
     parser.add_argument('--psf-pixels', type=int, default=25,
         help='Size of PSF stamp to use for guide star measurements')
