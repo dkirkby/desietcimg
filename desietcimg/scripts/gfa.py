@@ -69,11 +69,9 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
     if params is None:
         logging.error('Unable to fit PSF model')
         return
-    # Prepare dithered fits. The zoom parameter controls the spacing at the center
-    # of the grid relative to the outside, which increases linearly.
-    t = np.linspace(-1, +1, ndither)
-    offsets = 2 * maxdither / (zoomdither + 1) * t * (1 + 0.5 * (zoomdither - 1) * np.abs(t))
-    dithered = GMM.dither(params, offsets)
+    # Prepare dithered fits.
+    xdither, ydither = diskgrid(ndither, maxdither, alpha=2)
+    dithered = GMM.dither(params, xdither, ydither)
     # Initialize fiber templates for each guide star target centroid.
     max_rsq = (0.5 * fiber_diam_um / pixel_size_um) ** 2
     profile = lambda x, y: 1.0 * (x ** 2 + y ** 2 < max_rsq)
@@ -104,15 +102,14 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
             continue
         SY, SX = slice(ylo, yhi), slice(xlo, xhi)
         # Prepare a fiber template centered on the target position.
-        fiber = desietcimg.util.make_template(
-            stampsize, profile, dx=x0 - ix, dy=y0 - iy, normalized=False)
+        fiber = make_template(stampsize, profile, dx=x0 - ix, dy=y0 - iy, normalized=False)
         # Do not include the acquisition image.
         Dframes = GFA.data[1:, SY, SX]
         WDframes = GFA.ivar[1:, SY, SX]
         for iexp in range(nexp):
             D, WD = Dframes[iexp].copy(), WDframes[iexp].copy()
             # Estimate centroid, flux and constant background.
-            dx, dy, flux, bg, nll, best_fit = GMM.fit_dithered(offsets, dithered, D, WD)
+            dx, dy, flux, bg, nll, best_fit = GMM.fit_dithered(xdither, ydither, dithered, D, WD)
             if iexp == 0 and np.all(nelec_pred == 0):
                 # Use the first measured flux as the reference value for transparency.
                 nelec_pred = flux * exptime / exptime[0]
@@ -168,7 +165,7 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
                 stars_result = process_guide_sequence(stars, exptime, maxdither=maxdither, ndither=ndither)
                 if stars_result is not None and framepath is not None:
                     Dsum, WDsum, Msum, params = stars_result
-                    fig, ax = desietcimg.plot.plot_guide_stars(Dsum, WDsum, Msum, params, night, expid, camera)
+                    fig, ax = plot_guide_stars(Dsum, WDsum, Msum, params, night, expid, camera)
                     plt.savefig(framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
                     plt.close(fig)
                 result = GFA.psf_stack, stars_result
@@ -226,7 +223,7 @@ def process(inpath, args, pool=None, pool_timeout=5):
         assert GMM is not None, 'GMM not initialized.'
         PlateMaker, GuiderExpected = None, None
         try:
-            GuiderExpected, _, _ = desietcimg.gfa.load_guider_centroids(inpath.parent, expid)
+            GuiderExpected, _, _ = load_guider_centroids(inpath.parent, expid)
         except ValueError:
             logging.warning('Guider centroids json file not readable.')
         try:
@@ -376,9 +373,9 @@ def gfadiq():
         help='Save images of each GFA frame')
     parser.add_argument('--guide-stars', action='store_true',
         help='Measure guide stars in each frame of any guiding sequences')
-    parser.add_argument('--max-dither', type=float, default=5,
+    parser.add_argument('--max-dither', type=float, default=7,
         help='Maximum dither in pixels to use for guide star fits')
-    parser.add_argument('--num-dither', type=int, default=40,
+    parser.add_argument('--num-dither', type=int, default=1500,
         help='Number of dithers to use between (-max,+max)')
     parser.add_argument('--psf-pixels', type=int, default=25,
         help='Size of PSF stamp to use for guide star measurements')
