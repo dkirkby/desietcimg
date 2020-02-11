@@ -855,6 +855,8 @@ class PSFMeasure(object):
                 s = (Z[k] - 0.5) / (Z[k] - Z[k - 1])
                 fwhm = 2 * ((1 - s) * self.rang[k] + s * self.rang[k - 1])
         self.Z = Z
+        self.xcbest = xc
+        self.ycbest = yc
         return fwhm, np.max(fiberfrac)
 
 
