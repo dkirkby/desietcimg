@@ -5,6 +5,8 @@ import numpy as np
 import scipy.optimize
 import scipy.stats
 
+import fitsio
+
 import desietcimg.util
 
 
@@ -59,7 +61,7 @@ class BGFitter(object):
 
 
 def load_calib_data(name='SKY_calib.fits'):
-    names = collections.defaultdict
+    names = collections.defaultdict(list)
     slices = collections.defaultdict(list)
     calibs = collections.defaultdict(list)
     cameras = []
