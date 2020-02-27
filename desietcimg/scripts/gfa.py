@@ -29,10 +29,12 @@ from desietcimg.gfa import *
 from desietcimg.gmm import *
 from desietcimg.plot import *
 from desietcimg.util import *
+from desietcimg.sky import SkyCamera
 
 # Globals shared by process_one below.
 GFA = None
 GMM = None
+SKY = None
 rawbuf = np.empty((1, 1032, 2248), np.uint32)
 
 
@@ -187,12 +189,60 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
         return result
 
 
+def process_sky(inpath, outpath):
+    with fitsio.FITS(str(inpath)) as hdus:
+        hdr = hdus[0].read_header()
+        if 'NIGHT' not in hdr:
+            logging.warning('Missing NIGHT from hdu SKY')
+            # Hack until this gets fixed.
+            data = hdus['SKYCAM0T'].read()
+            night = str(data['NIGHT'][0])
+        else:
+            night = str(hdr['NIGHT'])
+        expid = '{0:08d}'.format(hdr['EXPID'])
+        exptime = hdr['EXPTIME']
+        nframes = hdr['FRAMES']
+        logging.info('Processing {0} x {1:.1f}s SKYCAM frames from {2}'.format(nframes, exptime, inpath))
+        outpath = outpath / night / expid
+        outpath.mkdir(parents=True, exist_ok=True)
+        fout = open(outpath / 'sky_{0}.dat'.format(expid), 'w')
+        f, df = np.zeros((2, nframes)), np.zeros((2, nframes))
+        for j, camera in enumerate(('SKYCAM0', 'SKYCAM1')):
+            if not camera in hdus:
+                logging.warn('Missing {0} HDU'.format(camera))
+                continue
+            framedata = hdus[camera].read()
+            if len(framedata) != nframes:
+                logging.error('Data size does not match header FRAMES')
+            for k, data in enumerate(framedata):
+                f[j, k], df[j, k] = SKY.setraw(data, name=camera)
+                print('{0} {1:.2f} {2:.2f}'.format(camera, f[j, k], df[j, k]), file=fout)
+    fout.close()
+    # Plot the results.
+    fig = plt.figure(figsize=(9, 5))
+    t = np.arange(1, nframes + 1)
+    f[1] *= 1.1449578
+    df[1] *= 1.1449578
+    plt.errorbar(t - 0.1, f[0], df[0], label='SKYCAM0', fmt='o')
+    plt.errorbar(t + 0.1, f[1], df[1], label='SKYCAM1', fmt='o')
+    plt.legend(ncol=2)
+    plt.xlabel('{0} {1} Frame #'.format(night, expid))
+    plt.ylabel('Sky Level [arb units]')
+    plt.savefig(outpath / 'sky_{0}.png'.format(expid))
+    plt.tight_layout()
+    plt.close(fig)
+
+
 def process(inpath, args, pool=None, pool_timeout=5):
     """Process a single GFA exposure.
     """
     global GFA
     if not inpath.exists():
         logging.error('Non-existant path: {0}'.format(inpath))
+        return
+    # Is this a skycam exposure?
+    if inpath.name.startswith('sky'):
+        process_sky(inpath, args.outpath)
         return
     # Is this a guiding exposure?
     guiding = inpath.name.startswith('guide')
@@ -329,7 +379,7 @@ def process(inpath, args, pool=None, pool_timeout=5):
     logging.info('Wrote {0}'.format(figpath))
 
 
-def get_gfa_exposures(inpath, checkpath, night, expstart=None, expstop=None):
+def get_gfa_exposures(inpath, checkpath, night, expstart=None, expstop=None, sky=False):
     """Return a list of existing paths to completed GFA exposures for night.
     """
     paths = []
@@ -338,6 +388,9 @@ def get_gfa_exposures(inpath, checkpath, night, expstart=None, expstop=None):
     innight = inpath / str(night)
     if not checknight.exists() or not innight.exists():
         return paths
+    patterns = ['gfa-{0}.fits.fz', 'guide-{0}.fits.fz']
+    if sky:
+        patterns.append('sky-{0}.fits.fz')
     # Loop over all exposure paths under this night.
     for exppath in checknight.glob('????????'):
         expid = str(exppath)[-8:]
@@ -346,7 +399,7 @@ def get_gfa_exposures(inpath, checkpath, night, expstart=None, expstop=None):
             continue
         if expstop is not None and expnum >= expstop:
             continue
-        for pattern in 'gfa-{0}.fits.fz', 'guide-{0}.fits.fz':
+        for pattern in patterns:
             path = innight / expid / pattern.format(expid)
             if path.exists():
                 paths.append(path)
@@ -379,6 +432,8 @@ def gfadiq():
         help='Number of dithers to use between (-max,+max)')
     parser.add_argument('--psf-pixels', type=int, default=25,
         help='Size of PSF stamp to use for guide star measurements')
+    parser.add_argument('--sky', action='store_true',
+        help='Also process sky camera data')
     parser.add_argument('--overwrite', action='store_true',
         help='Overwrite existing outputs')
     parser.add_argument('--inpath', type=str, metavar='PATH',
@@ -389,6 +444,8 @@ def gfadiq():
         help='Optional path where links are created to indicate a complete exposure')
     parser.add_argument('--calibpath', type=str, metavar='PATH',
         help='Path to GFA calibration FITS file to use')
+    parser.add_argument('--skycalibpath', type=str, metavar='PATH',
+        help='Path to SKYCAM calibration FITS file to use')
     parser.add_argument('--logpath', type=str, metavar='PATH',
         help='Path where logging output should be written')
     parser.add_argument('--npool', type=int, default=0, metavar='N',
@@ -477,6 +534,10 @@ def gfadiq():
         psf_grid = np.arange(args.psf_pixels + 1) - args.psf_pixels / 2
         GMM = GMMFit(psf_grid, psf_grid)
 
+    if args.sky:
+        global SKY
+        SKY = SkyCamera(calib_name=args.skycalibpath)
+
     if args.npool > 0:
         # Initialize multiprocessing.
         context = multiprocessing.get_context(method='fork')
@@ -501,7 +562,8 @@ def gfadiq():
             else:
                 print('Invalid --expid (should be N or N1-N2): "{0}"'.format(args.expid))
                 sys.exit(-1)
-            exposures |= get_gfa_exposures(args.inpath, args.checkpath, args.night, start, stop)
+            exposures |= get_gfa_exposures(
+                args.inpath, args.checkpath, args.night, start, stop, sky=args.sky)
         for path in sorted(exposures):
             process(path, args, pool)
         return
@@ -517,7 +579,8 @@ def gfadiq():
             try:
                 while True:
                     time.sleep(args.watch_interval)
-                    newexp = get_gfa_exposures(args.inpath, args.checkpath, args.night) - existing
+                    newexp = get_gfa_exposures(
+                        args.inpath, args.checkpath, args.night, sky=args.sky) - existing
                     for path in sorted(newexp):
                         process(path, args, pool)
                     existing |= newexp
