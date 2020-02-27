@@ -218,11 +218,17 @@ def process_sky(inpath, outpath):
                 f[j, k], df[j, k] = SKY.setraw(data, name=camera)
                 print('{0} {1:.2f} {2:.2f}'.format(camera, f[j, k], df[j, k]), file=fout)
     fout.close()
+    # Normalize to the exposure time.
+    f /= exptime
+    df /= exptime
+    # Apply relative calibration (temporary)
+    f[1] *= 1.1449578
+    df[1] *= 1.1449578
+    # Print the mean sky levels to the log.
+    logging.info('Mean SKYCAM0 = {0:.3f} SKYCAM1 = {1:.3f} [arb units]'.format(*f.mean(axis=1)))
     # Plot the results.
     fig = plt.figure(figsize=(9, 5))
     t = np.arange(1, nframes + 1)
-    f[1] *= 1.1449578
-    df[1] *= 1.1449578
     plt.errorbar(t - 0.1, f[0], df[0], label='SKYCAM0', fmt='o')
     plt.errorbar(t + 0.1, f[1], df[1], label='SKYCAM1', fmt='o')
     plt.legend(ncol=2)
