@@ -515,7 +515,7 @@ def gfadiq():
             args.calibpath = '/global/project/projectdirs/desi/cmx/gfa/calib/GFA_calib.fits'
         elif host is 'DOS':
             # Should use a more permanent path than this which is synched via svn.
-            args.calibpath = '/n/home/desiobserver/donut/GFA_calib.fits'
+            args.calibpath = '/data/desiobserver/gfadiq/GFA_calib.fits'
         else:
             print('No GFA calibration data path specified with --calibpath.')
             sys.exit(-1)
@@ -523,6 +523,22 @@ def gfadiq():
     if not args.calibpath.exists():
         print('Non-existant GFA calibration path: {0}'.format(args.calibpath))
         sys.exit(-2)
+
+    if args.sky:
+        # Locate the SKY calibration data.
+        if args.skycalibpath is None:
+            if host is 'NERSC':
+                args.skycalibpath = '/global/project/projectdirs/desi/cmx/sky/calib/SKY_calib.fits'
+            elif host is 'DOS':
+                # Should use a more permanent path than this which is synched via svn.
+                args.skycalibpath = '/data/desiobserver/gfadiq/SKY_calib.fits'
+            else:
+                print('No SKY calibration data path specified with --skycalibpath.')
+                sys.exit(-1)
+        args.skycalibpath = Path(args.skycalibpath)
+        if not args.skycalibpath.exists():
+            print('Non-existant SKY calibration path: {0}'.format(args.skycalibpath))
+            sys.exit(-2)
 
     # Initialize the GFA analysis object.
     global GFA
