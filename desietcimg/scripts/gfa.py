@@ -473,7 +473,7 @@ def gfadiq():
     # Determine where the input raw data is located.
     if args.inpath is None:
         if host is 'NERSC':
-            args.inpath = '/project/projectdirs/desi/spectro/data/'
+            args.inpath = '/global/cfs/cdirs/desi/spectro/data/'
         elif host is 'DOS':
             args.inpath = '/exposures/desi/'
         else:
