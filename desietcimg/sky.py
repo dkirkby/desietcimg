@@ -116,7 +116,7 @@ class SkyCamera(object):
         # Initialize background fitting.
         self.bgfitter = BGFitter()
 
-    def setraw(self, raw, name, gain=2.5, saturation=65500, refit=True, pullcut=5):
+    def setraw(self, raw, name, gain=2.5, saturation=65500, refit=True, pullcut=5, chisq_max=5, ndrop_max=2):
         """
         """
         if name not in self.slices:
@@ -173,7 +173,21 @@ class SkyCamera(object):
         self.pull[:N] = (self.data[:N] - self.model[:N]) * np.sqrt(self.ivar[:N])
         # Calculate the weighted mean of calibrated fluxes (marginalized over bg levels) and its error.
         calib = self.calibs[name]
-        wgt = (self.fluxerr[:N] / calib) ** -2
         cflux = self.flux[:N] / calib
-        ivar = wgt.sum()
-        return np.sum(wgt * cflux) / ivar, ivar ** -0.5
+        cfluxerr = self.fluxerr[:N] / calib
+        wgt = cfluxerr ** -2
+        used = np.ones(N, bool)
+        snr = self.flux[:N] / self.fluxerr[:N]
+        order = np.argsort(snr)[::-1]
+        self.ndrop = 0
+        while self.ndrop < ndrop_max:
+            ivar = np.sum(wgt[used])
+            meanflux = np.sum(wgt[used] * cflux[used]) / ivar
+            self.chisq = np.sum(((cflux[used] - meanflux) / cfluxerr[used]) ** 2) / (N - self.ndrop)
+            if self.chisq < chisq_max:
+                break
+            # Drop the remaining fiber with the highest SNR.
+            idrop = order[self.ndrop]
+            used[idrop] = False
+            self.ndrop += 1
+        return meanflux, ivar ** -0.5

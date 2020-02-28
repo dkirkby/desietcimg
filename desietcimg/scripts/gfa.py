@@ -217,7 +217,8 @@ def process_sky(inpath, outpath):
                 logging.error('Data size does not match header FRAMES')
             for k, data in enumerate(framedata):
                 f[j, k], df[j, k] = SKY.setraw(data, name=camera)
-                print('{0},{1},{2:.3f},{3:.3f}'.format(camera, k, f[j, k], df[j, k]), file=fout)
+                print('{0},{1},{2:.3f},{3:.3f},{4:.3f},{5}'.format(
+                    camera, k, f[j, k], df[j, k], SKY.chisq, SKY.ndata - SKY.ndrop), file=fout)
     fout.close()
     # Normalize to the exposure time.
     f /= exptime
