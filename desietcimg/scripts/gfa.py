@@ -221,9 +221,6 @@ def process_sky(inpath, outpath):
     # Normalize to the exposure time.
     f /= exptime
     df /= exptime
-    # Apply relative calibration (temporary)
-    f[1] *= 1.1449578
-    df[1] *= 1.1449578
     # Print the mean sky levels to the log.
     logging.info('Mean SKYCAM0 = {0:.3f} SKYCAM1 = {1:.3f} [arb units]'.format(*f.mean(axis=1)))
     # Plot the results.
