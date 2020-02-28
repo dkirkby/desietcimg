@@ -199,6 +199,7 @@ def process_sky(inpath, outpath):
             night = str(data['NIGHT'][0])
         else:
             night = str(hdr['NIGHT'])
+        program = hdr.get('PROGRAM', 'No PROGRAM specified')
         expid = '{0:08d}'.format(hdr['EXPID'])
         exptime = hdr['EXPTIME']
         nframes = hdr['FRAMES']
@@ -228,11 +229,11 @@ def process_sky(inpath, outpath):
     t = np.arange(1, nframes + 1)
     plt.errorbar(t - 0.1, f[0], df[0], label='SKYCAM0', fmt='o')
     plt.errorbar(t + 0.1, f[1], df[1], label='SKYCAM1', fmt='o')
-    plt.legend(ncol=2)
+    plt.legend(ncol=2, title=program)
     plt.xlabel('{0} {1} Frame #'.format(night, expid))
-    plt.ylabel('Sky Level [arb units]')
-    plt.savefig(outpath / 'sky_{0}.png'.format(expid))
+    plt.ylabel('Sky Level / ({0:.1f}s) [arb units]'.format(exptime))
     plt.tight_layout()
+    plt.savefig(outpath / 'sky_{0}.png'.format(expid))
     plt.close(fig)
 
 
