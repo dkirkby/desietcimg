@@ -515,7 +515,7 @@ def gfadiq():
     # Locate the GFA calibration data.
     if args.calibpath is None:
         if host is 'NERSC':
-            args.calibpath = '/global/project/projectdirs/desi/cmx/gfa/calib/GFA_calib.fits'
+            args.calibpath = '/global/cfs/cdirs/desi/cmx/gfa/calib/GFA_calib.fits'
         elif host is 'DOS':
             # Should use a more permanent path than this which is synched via svn.
             args.calibpath = '/data/desiobserver/gfadiq/GFA_calib.fits'
@@ -531,7 +531,7 @@ def gfadiq():
         # Locate the SKY calibration data.
         if args.skycalibpath is None:
             if host is 'NERSC':
-                args.skycalibpath = '/global/project/projectdirs/desi/cmx/sky/calib/SKY_calib.fits'
+                args.skycalibpath = '/global/cfs/cdirs/desi/cmx/sky/calib/SKY_calib.fits'
             elif host is 'DOS':
                 # Should use a more permanent path than this which is synched via svn.
                 args.skycalibpath = '/data/desiobserver/gfadiq/SKY_calib.fits'
