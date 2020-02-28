@@ -206,7 +206,7 @@ def process_sky(inpath, outpath):
         logging.info('Processing {0} x {1:.1f}s SKYCAM frames from {2}'.format(nframes, exptime, inpath))
         outpath = outpath / night / expid
         outpath.mkdir(parents=True, exist_ok=True)
-        fout = open(outpath / 'sky_{0}.dat'.format(expid), 'w')
+        fout = open(outpath / 'sky_{0}.csv'.format(expid), 'w')
         f, df = np.zeros((2, nframes)), np.zeros((2, nframes))
         for j, camera in enumerate(('SKYCAM0', 'SKYCAM1')):
             if not camera in hdus:
@@ -217,7 +217,7 @@ def process_sky(inpath, outpath):
                 logging.error('Data size does not match header FRAMES')
             for k, data in enumerate(framedata):
                 f[j, k], df[j, k] = SKY.setraw(data, name=camera)
-                print('{0} {1:.2f} {2:.2f}'.format(camera, f[j, k], df[j, k]), file=fout)
+                print('{0},{1},{2:.3f},{3:.3f}'.format(camera, k, f[j, k], df[j, k]), file=fout)
     fout.close()
     # Normalize to the exposure time.
     f /= exptime
