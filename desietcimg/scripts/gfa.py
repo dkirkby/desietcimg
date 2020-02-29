@@ -143,20 +143,26 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
             logging.error('Missing HDU {0}'.format(camera))
             return None
         logging.info('Processing {0}'.format(camera))
-        if guiding and stars is not None:
-            # Process all exposures.
-            raw = hdus[camera][:, :, :]
-        else:
-            if guiding:
-                # Only process the initial acquisition image of a guideing sequence.
-                raw = rawbuf[0] = hdus[camera][0, :, :]
-                exptime, ccdtemp = exptime[0], ccdtemp[0]
+        try:
+            if guiding and stars is not None:
+                # Process all exposures.
+                raw = hdus[camera][:, :, :]
             else:
-                # There is only one exposure to process.
-                raw = rawbuf[0] = hdus[camera][:, :]
+                if guiding:
+                    # Only process the initial acquisition image of a guideing sequence.
+                    raw = rawbuf[0] = hdus[camera][0, :, :]
+                    exptime, ccdtemp = exptime[0], ccdtemp[0]
+                else:
+                    # There is only one exposure to process.
+                    raw = rawbuf[0] = hdus[camera][:, :]
+        except ValueError as e:
+            logging.error('Failed to read raw data:')
+            logging.error(e)
+            return None
         try:
             GFA.setraw(raw, name=camera)
         except ValueError as e:
+            logging.error('Failed to process raw data:')
             logging.error(e)
             return None
         GFA.data -= GFA.get_dark_current(ccdtemp, exptime)
