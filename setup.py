@@ -18,6 +18,7 @@ setup(
             'ciproc=desietcimg.scripts.guide:ciproc',
             'etccalib=desietcimg.scripts.calib:etccalib',
             'gfadiq=desietcimg.scripts.gfa:gfadiq',
+            'etcserve=desietcimg.scripts.webserve:webserve',
         ],
     }
 )
