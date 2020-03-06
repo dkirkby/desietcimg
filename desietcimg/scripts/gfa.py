@@ -81,6 +81,7 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
     Dsum = np.zeros((nstars, stampsize, stampsize))
     WDsum = np.zeros((nstars, stampsize, stampsize))
     Msum = np.zeros((nstars, stampsize, stampsize))
+    Mframes = np.zeros((nexp, stampsize, stampsize))
     params = np.empty((nstars, nexp, 5))
     for istar in range(nstars):
         # Lookup the platemaker target coordinates and magnitude for this guide star.
@@ -120,11 +121,14 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
             # Accumulate this exposure.
             Dsum[istar] += D * WD
             WDsum[istar] += WD
+            # Coadd per-exposure best-fit models for star.
             Msum[istar] += flux * best_fit
+            # Coadd per-star best-fit models for this exposure.
+            Mframes[iexp] += flux * best_fit
             params[istar, iexp] = (dx, dy, flux / nelec_pred[iexp], fiberfrac, nll)
         Dsum[istar] = np.divide(
             Dsum[istar], WDsum[istar], out=np.zeros_like(Dsum[istar]), where=WDsum[istar] > 0)
-    return Dsum, WDsum, Msum, params
+    return Dsum, WDsum, Msum, Mframes, params
 
 
 def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath,
@@ -172,7 +176,7 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
             if GFA.psf_stack[0] is not None and stars is not None:
                 stars_result = process_guide_sequence(stars, exptime, maxdither=maxdither, ndither=ndither)
                 if stars_result is not None and framepath is not None:
-                    Dsum, WDsum, Msum, params = stars_result
+                    Dsum, WDsum, Msum, Mframes, params = stars_result
                     fig, ax = plot_guide_stars(Dsum, WDsum, Msum, params, night, expid, camera)
                     plt.savefig(framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
                     plt.close(fig)
@@ -377,9 +381,10 @@ def process(inpath, args, pool=None, pool_timeout=5):
                     hdus.write(np.stack(L).astype(np.float32), extname=camera + 'L')
                 if R is not None:
                     hdus.write(np.stack(R).astype(np.float32), extname=camera + 'R')
-            if frames  is not None:
-                (Dsum, WDsum, Msum, params) = frames
+            if frames is not None:
+                (Dsum, WDsum, Msum, Mframes, params) = frames
                 hdus.write(np.stack((Dsum, WDsum, Msum)).astype(np.float32), extname=camera + 'G')
+                hdus.write(Mframes.astype(np.float32), extname=camera + 'F')
                 hdus.write(params.astype(np.float32), extname=camera + 'P')
     # Produce a summary plot of the delivered image quality measured from the first image.
     fig = plot_image_quality({camera: result[0] for camera, result in results.items()}, meta)
