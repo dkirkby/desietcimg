@@ -118,7 +118,9 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
                     # Use the first measured flux as the reference value for transparency.
                     nelec_pred = flux * exptime / exptime[0]
                 else:
-                    logging.warning('First guide frame has EXPTIME=0')
+                    if istar == 0:
+                        logging.warning(
+                            'First guide frame has EXPTIME=0 so unable to calculate transparency')
                     nelec_pred = flux * np.ones_like(exptime)
             # Calculate the flux fraction within the fiber aperture using the best-fit model.
             fiberfrac = np.sum(fiber * best_fit)
