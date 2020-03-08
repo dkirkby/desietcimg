@@ -67,13 +67,13 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
     S = slice(ntrim, ntrim + stampsize)
     T, WT = T[S, S], WT[S, S]
     # Fit the PSF to a Gaussian mixture model.
-    params = GMM.fit(T, WT, ngauss=3)
-    if params is None:
+    gmm_params = GMM.fit(T, WT, ngauss=3)
+    if gmm_params is None:
         logging.error('Unable to fit PSF model')
         return
     # Prepare dithered fits.
     xdither, ydither = diskgrid(ndither, maxdither, alpha=2)
-    dithered = GMM.dither(params, xdither, ydither)
+    dithered = GMM.dither(gmm_params, xdither, ydither)
     # Initialize fiber templates for each guide star target centroid.
     max_rsq = (0.5 * fiber_diam_um / pixel_size_um) ** 2
     profile = lambda x, y: 1.0 * (x ** 2 + y ** 2 < max_rsq)
@@ -81,8 +81,7 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
     Dsum = np.zeros((nstars, stampsize, stampsize))
     WDsum = np.zeros((nstars, stampsize, stampsize))
     Msum = np.zeros((nstars, stampsize, stampsize))
-    Mframes = np.zeros((nexp, stampsize, stampsize))
-    params = np.empty((nstars, nexp, 5))
+    fit_params = np.empty((nstars, nexp, 5))
     for istar in range(nstars):
         # Lookup the platemaker target coordinates and magnitude for this guide star.
         x0, y0, rmag = stars[istar]
@@ -105,7 +104,8 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
             continue
         SY, SX = slice(ylo, yhi), slice(xlo, xhi)
         # Prepare a fiber template centered on the target position.
-        fiber = make_template(stampsize, profile, dx=x0 - ix, dy=y0 - iy, normalized=False)
+        fiber_dx, fiber_dy = x0 - ix, y0 - iy
+        fiber = make_template(stampsize, profile, dx=fiber_dx, dy=fiber_dy, normalized=False)
         # Do not include the acquisition image.
         Dframes = GFA.data[1:, SY, SX]
         WDframes = GFA.ivar[1:, SY, SX]
@@ -114,8 +114,12 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
             # Estimate centroid, flux and constant background.
             dx, dy, flux, bg, nll, best_fit = GMM.fit_dithered(xdither, ydither, dithered, D, WD)
             if iexp == 0 and np.all(nelec_pred == 0):
-                # Use the first measured flux as the reference value for transparency.
-                nelec_pred = flux * exptime / exptime[0]
+                if exptime[0] > 0:
+                    # Use the first measured flux as the reference value for transparency.
+                    nelec_pred = flux * exptime / exptime[0]
+                else:
+                    logging.warning('First guide frame has EXPTIME=0')
+                    nelec_pred = flux
             # Calculate the flux fraction within the fiber aperture using the best-fit model.
             fiberfrac = np.sum(fiber * best_fit)
             # Accumulate this exposure.
@@ -123,12 +127,14 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
             WDsum[istar] += WD
             # Coadd per-exposure best-fit models for star.
             Msum[istar] += flux * best_fit
-            # Coadd per-star best-fit models for this exposure.
-            Mframes[iexp] += flux * best_fit
-            params[istar, iexp] = (dx, dy, flux / nelec_pred[iexp], fiberfrac, nll)
+            # Record the best-fit parameters for this guide star.
+            # Centroids are relative to the nominal fiber center (fiber_dx, fiber_dy)
+            # which will be within 1 pixel of the stamp center.
+            fit_params[istar, iexp] = (
+                dx - fiber_dx, dy - fiber_dy, flux / nelec_pred[iexp], fiberfrac, nll)
         Dsum[istar] = np.divide(
             Dsum[istar], WDsum[istar], out=np.zeros_like(Dsum[istar]), where=WDsum[istar] > 0)
-    return Dsum, WDsum, Msum, Mframes, params
+    return Dsum, WDsum, Msum, fit_params, gmm_params
 
 
 def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath,
@@ -176,8 +182,8 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
             if GFA.psf_stack[0] is not None and stars is not None:
                 stars_result = process_guide_sequence(stars, exptime, maxdither=maxdither, ndither=ndither)
                 if stars_result is not None and framepath is not None:
-                    Dsum, WDsum, Msum, Mframes, params = stars_result
-                    fig, ax = plot_guide_stars(Dsum, WDsum, Msum, params, night, expid, camera)
+                    Dsum, WDsum, Msum, fit_params, gmm_params = stars_result
+                    fig, ax = plot_guide_stars(Dsum, WDsum, Msum, fit_params, night, expid, camera)
                     plt.savefig(framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
                     plt.close(fig)
                 result = GFA.psf_stack, stars_result
@@ -382,10 +388,10 @@ def process(inpath, args, pool=None, pool_timeout=5):
                 if R is not None:
                     hdus.write(np.stack(R).astype(np.float32), extname=camera + 'R')
             if frames is not None:
-                (Dsum, WDsum, Msum, Mframes, params) = frames
+                (Dsum, WDsum, Msum, fit_params, gmm_params) = frames
                 hdus.write(np.stack((Dsum, WDsum, Msum)).astype(np.float32), extname=camera + 'G')
-                hdus.write(Mframes.astype(np.float32), extname=camera + 'F')
-                hdus.write(params.astype(np.float32), extname=camera + 'P')
+                hdus.write(fit_params.astype(np.float32), extname=camera + 'P')
+                hdus.write(gmm_params.astype(np.float32), extname=camera + 'M')
     # Produce a summary plot of the delivered image quality measured from the first image.
     fig = plot_image_quality({camera: result[0] for camera, result in results.items()}, meta)
     # Save the summary plot.
