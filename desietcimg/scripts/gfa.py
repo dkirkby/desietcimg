@@ -119,7 +119,7 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
                     nelec_pred = flux * exptime / exptime[0]
                 else:
                     logging.warning('First guide frame has EXPTIME=0')
-                    nelec_pred = flux
+                    nelec_pred = flux * np.ones_like(exptime)
             # Calculate the flux fraction within the fiber aperture using the best-fit model.
             fiberfrac = np.sum(fiber * best_fit)
             # Accumulate this exposure.
