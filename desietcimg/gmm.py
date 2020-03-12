@@ -477,3 +477,55 @@ class GMMFit(object):
             flux[kmin], bgdensity[kmin],
             nll[kmin] / data.size,
             dithered[kmin])
+
+# The methods below apply some transformation to a model by returning
+# a modified copy of the input parameters.
+
+def normalize(params, norm=1):
+    """Normalize the model"""
+    base = len(params) % 6
+    assert base in (0, 1), 'Invalid params length.'
+    normalized = params.copy()
+    oldnorm = params[base::6].sum()
+    normalized[base::6] *= norm / oldnorm
+    return normalized
+
+def translate(params, dx, dy):
+    """Translate the model by the specified offset"""
+    base = len(params) % 6
+    assert base in (0, 1), 'Invalid params length.'
+    translated = params.copy()
+    translated[base + 1::6] += dx
+    translated[base + 2::6] += dy
+    return translated
+
+def rotate(params, angle):
+    """Rotate the model by the specified counter-clockwise angle in radians about the origin"""
+    sinth = np.sin(angle)
+    costh = np.cos(angle)
+    base = len(params) % 6
+    assert base in (0, 1), 'Invalid params length.'
+    rotated = params.copy()
+    # Extract the initial covariance parameters.
+    sigma1 = params[base + 3::6]
+    sigma2 = params[base + 4::6]
+    rho = params[base + 5::6]
+    # Lookup the initial centers.
+    mu1 = params[base + 1::6]
+    mu2 = params[base + 2::6]
+    # Rotate each center.
+    rotated[base + 1::6] = mu1 * costh - mu2 * sinth
+    rotated[base + 2::6] = mu2 * costh + mu1 * sinth
+    # Calculate the initial covariance matrix elements.
+    C11 = sigma1 ** 2
+    C12 = rho * sigma1 * sigma2
+    C22 = sigma2 ** 2
+    # Calculate the rotated covariance matrix elements.
+    C11r = C11 * costh ** 2 - 2 * C12 * costh * sinth + C22 * sinth ** 2
+    C12r = (C11 - C22) * costh * sinth + C12 * (costh ** 2 - sinth ** 2)
+    C22r = C22 * costh ** 2 + 2 * C12 * costh * sinth + C11 * sinth ** 2
+    # Calculate and store the rotated covariance parameters.
+    rotated[base + 3::6] = np.sqrt(C11r)
+    rotated[base + 4::6] = np.sqrt(C22r)
+    rotated[base + 5::6] = C12r / (rotated[base + 3::6] * rotated[base + 4::6])
+    return rotated
