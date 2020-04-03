@@ -478,6 +478,29 @@ class GMMFit(object):
             nll[kmin] / data.size,
             dithered[kmin])
 
+
+def print_params(params):
+    """Pretty print parameter values for a GMM model.
+    """
+    params = np.asarray(params)
+    nparams = len(params)
+    labels = ['NORM', 'MU1', 'MU2', 'SIGMA1', 'SIGMA2', 'RHO']
+    if nparams % 6 == 1:
+        bglevel = params[0]
+        params = params[1:]
+        labels.append('BG')
+    else:
+        bglevel = None
+    assert len(params) % 6 == 0
+    ngauss = params // 6
+    print(' '.join(['{0:>7s}'.format(label) for label in labels]))
+    for k in range(nparams // 6):
+        values = params[6 * k:6 * (k + 1)]
+        if k == 0 and bglevel is not None:
+            values = np.append(values, bglevel)
+        print(' '.join(['{0:7.4f}'.format(value) for value in values]))
+
+
 # The methods below apply some transformation to a model by returning
 # a modified copy of the input parameters.
 
