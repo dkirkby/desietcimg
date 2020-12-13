@@ -406,16 +406,17 @@ def process(inpath, args, pool=None, pool_timeout=5):
     logging.info('Wrote {0}'.format(figpath))
 
 
-def get_gfa_exposures(inpath, checkpath, night, expstart=None, expstop=None, sky=False):
+def get_gfa_exposures(inpath, checkpath, night, expstart=None, expstop=None, sky=False, gfa=True):
     """Return a list of existing paths to completed GFA exposures for night.
     """
+    assert sky or gfa
     paths = []
     # Has a directory for this night been created yet?
     checknight = checkpath / str(night)
     innight = inpath / str(night)
     if not checknight.exists() or not innight.exists():
         return paths
-    patterns = ['gfa-{0}.fits.fz', 'guide-{0}.fits.fz']
+    patterns = ['gfa-{0}.fits.fz', 'guide-{0}.fits.fz'] if gfa else []
     if sky:
         patterns.append('sky-{0}.fits.fz')
     # Loop over all exposure paths under this night.
@@ -461,6 +462,8 @@ def gfadiq():
         help='Size of PSF stamp to use for guide star measurements')
     parser.add_argument('--sky', action='store_true',
         help='Also process sky camera data')
+    parser.add_argument('--sky-only', action='store_true',
+        help='Only process sky camera data')
     parser.add_argument('--dry-run', action='store_true',
         help='Print file names only with no further processing')
     parser.add_argument('--overwrite', action='store_true',
@@ -553,6 +556,7 @@ def gfadiq():
         print('Non-existant GFA calibration path: {0}'.format(args.calibpath))
         sys.exit(-2)
 
+    args.sky = args.sky or args.sky_only
     if args.sky:
         # Locate the SKY calibration data.
         if args.skycalibpath is None:
@@ -608,14 +612,16 @@ def gfadiq():
                 print('Invalid --expid (should be N or N1-N2): "{0}"'.format(args.expid))
                 sys.exit(-1)
             exposures |= get_gfa_exposures(
-                args.inpath, args.checkpath, args.night, start, stop, sky=args.sky)
+                args.inpath, args.checkpath, args.night, start, stop,
+                sky=args.sky, gfa=not args.sky_only)
         for path in sorted(exposures):
             process(path, args, pool)
         return
 
     if args.batch or args.watch:
         # Find the existing exposures on this night.
-        existing = get_gfa_exposures(args.inpath, args.checkpath, args.night, sky=args.sky)
+        existing = get_gfa_exposures(args.inpath, args.checkpath, args.night,
+                                     sky=args.sky, gfa=not args.sky_only)
         if args.batch:
             for path in sorted(existing):
                 process(path, args, pool)
@@ -625,7 +631,8 @@ def gfadiq():
                 while True:
                     time.sleep(args.watch_interval)
                     newexp = get_gfa_exposures(
-                        args.inpath, args.checkpath, args.night, sky=args.sky) - existing
+                        args.inpath, args.checkpath, args.night,
+                        sky=args.sky, gfa=not args.sky_only) - existing
                     for path in sorted(newexp):
                         process(path, args, pool)
                     existing |= newexp
