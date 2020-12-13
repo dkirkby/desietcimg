@@ -263,6 +263,9 @@ def process(inpath, args, pool=None, pool_timeout=5):
     if not inpath.exists():
         logging.error('Non-existant path: {0}'.format(inpath))
         return
+    if args.dry_run:
+        logging.info(f'dry run: {inpath}')
+        return
     # Is this a skycam exposure?
     if inpath.name.startswith('sky'):
         process_sky(inpath, args.outpath)
@@ -458,6 +461,8 @@ def gfadiq():
         help='Size of PSF stamp to use for guide star measurements')
     parser.add_argument('--sky', action='store_true',
         help='Also process sky camera data')
+    parser.add_argument('--dry-run', action='store_true',
+        help='Print file names only with no further processing')
     parser.add_argument('--overwrite', action='store_true',
         help='Overwrite existing outputs')
     parser.add_argument('--inpath', type=str, metavar='PATH',
@@ -490,9 +495,9 @@ def gfadiq():
 
     # Determine where the input raw data is located.
     if args.inpath is None:
-        if host is 'NERSC':
+        if host == 'NERSC':
             args.inpath = '/global/cfs/cdirs/desi/spectro/data/'
-        elif host is 'DOS':
+        elif host == 'DOS':
             args.inpath = '/exposures/desi/'
         else:
             print('No input path specified with --inpath.')
@@ -505,7 +510,7 @@ def gfadiq():
 
     # Determine which directory to check for completed exposures.
     if args.checkpath is None:
-        if host is 'DOS':
+        if host == 'DOS':
             args.checkpath = '/data/dts/exposures/raw/'
         else:
             args.checkpath = args.inpath
@@ -535,9 +540,9 @@ def gfadiq():
 
     # Locate the GFA calibration data.
     if args.calibpath is None:
-        if host is 'NERSC':
+        if host == 'NERSC':
             args.calibpath = '/global/cfs/cdirs/desi/cmx/gfa/calib/GFA_calib.fits'
-        elif host is 'DOS':
+        elif host == 'DOS':
             # Should use a more permanent path than this which is synched via svn.
             args.calibpath = '/data/desiobserver/gfadiq/GFA_calib.fits'
         else:
@@ -551,9 +556,9 @@ def gfadiq():
     if args.sky:
         # Locate the SKY calibration data.
         if args.skycalibpath is None:
-            if host is 'NERSC':
+            if host == 'NERSC':
                 args.skycalibpath = '/global/cfs/cdirs/desi/cmx/sky/calib/SKY_calib.fits'
-            elif host is 'DOS':
+            elif host == 'DOS':
                 # Should use a more permanent path than this which is synched via svn.
                 args.skycalibpath = '/data/desiobserver/gfadiq/SKY_calib.fits'
             else:
@@ -610,7 +615,7 @@ def gfadiq():
 
     if args.batch or args.watch:
         # Find the existing exposures on this night.
-        existing = get_gfa_exposures(args.inpath, args.checkpath, args.night)
+        existing = get_gfa_exposures(args.inpath, args.checkpath, args.night, sky=args.sky)
         if args.batch:
             for path in sorted(existing):
                 process(path, args, pool)
