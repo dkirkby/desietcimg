@@ -208,36 +208,49 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
 
 
 def process_sky(inpath, outpath):
-    with fitsio.FITS(str(inpath)) as hdus:
-        hdr = hdus[0].read_header()
-        if 'NIGHT' not in hdr:
-            logging.warning('Missing NIGHT from hdu SKY')
-            # Hack until this gets fixed.
-            data = hdus['SKYCAM0T'].read()
-            night = str(data['NIGHT'][0])
-        else:
-            night = str(hdr['NIGHT'])
-        program = hdr.get('PROGRAM', 'No PROGRAM specified')
-        expid = '{0:08d}'.format(hdr['EXPID'])
-        exptime = hdr['EXPTIME']
-        nframes = hdr['FRAMES']
-        logging.info('Processing {0} x {1:.1f}s SKYCAM frames from {2}'.format(nframes, exptime, inpath))
-        outpath = outpath / night / expid
-        outpath.mkdir(parents=True, exist_ok=True)
-        fout = open(outpath / 'sky_{0}.csv'.format(expid), 'w')
-        f, df = np.zeros((2, nframes)), np.zeros((2, nframes))
-        for j, camera in enumerate(('SKYCAM0', 'SKYCAM1')):
-            if not camera in hdus:
-                logging.warn('Missing {0} HDU'.format(camera))
-                continue
-            framedata = hdus[camera].read()
-            if len(framedata) != nframes:
-                logging.error('Data size does not match header FRAMES')
-            for k, data in enumerate(framedata):
-                f[j, k], df[j, k] = SKY.setraw(data, name=camera)
-                print('{0},{1},{2:.3f},{3:.3f},{4:.3f},{5}'.format(
-                    camera, k, f[j, k], df[j, k], SKY.chisq, SKY.ndata - SKY.ndrop), file=fout)
-    fout.close()
+    try:
+        with fitsio.FITS(str(inpath)) as hdus:
+            hdr = hdus[0].read_header()
+            if 'NIGHT' not in hdr:
+                logging.warning('Missing NIGHT from hdu SKY')
+                # Hack until this gets fixed.
+                data = hdus['SKYCAM0T'].read()
+                night = str(data['NIGHT'][0])
+            else:
+                night = str(hdr['NIGHT'])
+            program = hdr.get('PROGRAM', 'No PROGRAM specified')
+            expid = '{0:08d}'.format(hdr['EXPID'])
+            if 'EXPTIME' in hdr:
+                exptime = hdr['EXPTIME']
+            elif 'SKYTIME' in hdr:
+                exptime = hdr['SKYTIME']
+            else:
+                logging.error('Missing EXPTIME or SKYTIME from HDU0')
+                return
+            if exptime is None or float(exptime) <= 0:
+                logging.error(f'Invalid exptime in {inpath}')
+                return
+            nframes = hdr['FRAMES']
+            logging.info('Processing {0} x {1:.1f}s SKYCAM frames from {2}'.format(nframes, exptime, inpath))
+            outpath = outpath / night / expid
+            outpath.mkdir(parents=True, exist_ok=True)
+            fout = open(outpath / 'sky_{0}.csv'.format(expid), 'w')
+            f, df = np.zeros((2, nframes)), np.zeros((2, nframes))
+            for j, camera in enumerate(('SKYCAM0', 'SKYCAM1')):
+                if not camera in hdus:
+                    logging.warn('Missing {0} HDU'.format(camera))
+                    continue
+                framedata = hdus[camera].read()
+                if len(framedata) != nframes:
+                    logging.error('Data size does not match header FRAMES')
+                for k, data in enumerate(framedata):
+                    f[j, k], df[j, k] = SKY.setraw(data, name=camera)
+                    print('{0},{1},{2:.3f},{3:.3f},{4:.3f},{5}'.format(
+                        camera, k, f[j, k], df[j, k], SKY.chisq, SKY.ndata - SKY.ndrop), file=fout)
+            fout.close()
+    except OSError as e:
+        logging.error(f'Error reading {inpath}')
+        return
     # Normalize to the exposure time.
     f /= exptime
     df /= exptime
