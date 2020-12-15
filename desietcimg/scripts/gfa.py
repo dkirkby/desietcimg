@@ -305,6 +305,9 @@ def process(inpath, args, pool=None, pool_timeout=5):
         # https://heasarc.gsfc.nasa.gov/docs/software/fitsio/c/c_user/node20.html
         logging.warning('Patching {0}/{1} keyword value.'.format(hdr_ext, cameras_key))
         cameras = 'GUIDE0,FOCUS1,GUIDE2,GUIDE3,FOCUS4,GUIDE5,FOCUS6,GUIDE7,GUIDE8,FOCUS9'
+    if cameras == 'G0,G2,G3,G5,G7,G8,F1,F4,F6,F9':
+        # Data after the Nov-2020 restart needs this for GFA FITS files.
+        cameras = 'GUIDE0,FOCUS1,GUIDE2,GUIDE3,FOCUS4,GUIDE5,FOCUS6,GUIDE7,GUIDE8,FOCUS9'
     night = str(hdr['NIGHT'])
     expid = '{0:08d}'.format(hdr['EXPID'])
     if hdr['EXPTIME'] == 0:
