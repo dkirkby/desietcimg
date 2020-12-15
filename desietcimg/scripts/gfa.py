@@ -242,13 +242,19 @@ def process_sky(inpath, outpath):
                 if not camera in hdus:
                     logging.warn('Missing {0} HDU'.format(camera))
                     continue
+                if camera + 'T' in hdus:
+                    meta = hdus[camera + 'T'].read()
+                    mjd = meta['MJD-OBS']
+                else:
+                    logging.warn('Missing {0} HDU so MJD=0'.format(camera+'T'))
+                    mjd = np.zeros(nframes)
                 framedata = hdus[camera].read()
                 if len(framedata) != nframes:
                     logging.error('Data size does not match header FRAMES')
                 for k, data in enumerate(framedata):
                     f[j, k], df[j, k] = SKY.setraw(data, name=camera)
-                    print('{0},{1},{2:.3f},{3:.3f},{4:.3f},{5}'.format(
-                        camera, k, f[j, k], df[j, k], SKY.chisq, SKY.ndata - SKY.ndrop), file=fout)
+                    print('{0},{1},{2},{3:.3f},{4:.3f},{5:.3f},{6}'.format(
+                        camera, k, mjd[k], f[j, k], df[j, k], SKY.chisq, SKY.ndata - SKY.ndrop), file=fout)
             fout.close()
     except OSError as e:
         logging.error(f'Error reading {inpath}')
