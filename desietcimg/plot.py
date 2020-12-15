@@ -1,6 +1,7 @@
 """Plotting utilities. Import requires matplotlib.
 """
 import datetime
+import copy # for shallow copies of matplotlib colormaps
 
 import numpy as np
 import scipy.signal
@@ -41,7 +42,7 @@ def plot_image(D, W=None, ax=None, cmap='viridis', masked_color='chocolate', thr
         informative = np.ones_like(D, bool)
     vmin, vmax = np.percentile(D[informative], (0, 100))
     ax = ax or plt.gca()
-    cmap = matplotlib.cm.get_cmap(cmap)
+    cmap = copy.copy(matplotlib.cm.get_cmap(cmap))
     cmap.set_bad(color=masked_color)
     h, w = D.shape
     I = ax.imshow(D, interpolation='none', origin='lower', cmap=cmap, vmin=vmin, vmax=vmax,
@@ -242,7 +243,7 @@ def plot_pixels(D, label=None, colorhist=False, zoom=1, masked_color='cyan',
         if name not in args:
             args[name] = default
     # Set the masked color in the specified colormap.
-    cmap = matplotlib.cm.get_cmap(args['cmap'])
+    cmap = copy.copy(matplotlib.cm.get_cmap(args['cmap']))
     cmap.set_bad(color=masked_color)
     args['cmap'] = cmap
     # Draw the image.
@@ -349,7 +350,7 @@ def plot_calib_frame(CA, what='bias', downsampling=4, cmap='viridis', masked_col
     fig = plt.figure(figsize=(nx / downsampling / dpi, ny / downsampling / dpi), dpi=dpi, frameon=False)
     ax = plt.axes((0, 0, 1, 1))
     ax.axis('off')
-    cmap = matplotlib.cm.get_cmap(cmap)
+    cmap = copy.copy(matplotlib.cm.get_cmap(cmap))
     cmap.set_bad(color=masked_color)
     if what in ('bias', 'mu'):
         D = CA.pixbias.copy() if what == 'bias' else CA.darkmu.copy()
@@ -439,7 +440,7 @@ def plot_dark_calib(CA, gain=1.5, peaklines=True, lo=None, hi=None, ax=None):
 
 def plot_stack(stack, cmap='plasma_r', masked_color='cyan', offset=0):
     nstack = len(stack)
-    cmap = matplotlib.cm.get_cmap(cmap)
+    cmap = copy.copy(matplotlib.cm.get_cmap(cmap))
     cmap.set_bad(color=masked_color)
     A = desietcimg.plot.Axes(nstack, size=2, pad=0.01)
     outline = [
@@ -480,7 +481,7 @@ def plot_distance_matrix(stamps, cmap='magma', masked_color='cyan', dpi=100, max
     size = nstamps * dxy
     inset = slice(maxdither, ny - maxdither), slice(maxdither, nx - maxdither)
     fig = plt.figure(figsize=(size / dpi, size / dpi), dpi=dpi, frameon=False)
-    cmap = matplotlib.cm.get_cmap(cmap)
+    cmap = copy.copy(matplotlib.cm.get_cmap(cmap))
     cmap.set_bad(color=masked_color)
     def create_axis(i, j, expand=1):
         ax = plt.axes((i * dxy / size, j * dxy / size, expand * dxy / size, expand * dxy / size))

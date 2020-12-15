@@ -186,7 +186,8 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
                 if stars_result is not None and framepath is not None:
                     Dsum, WDsum, Msum, fit_params, gmm_params = stars_result
                     fig, ax = plot_guide_stars(Dsum, WDsum, Msum, fit_params, night, expid, camera)
-                    plt.savefig(framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
+                    plt.savefig(framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format),
+                                pil_kwargs=dict(quality=80))
                     plt.close(fig)
                 result = GFA.psf_stack, stars_result
             else:
@@ -202,7 +203,8 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
             label = '{0} {1} {2:.1f}s {3:.1f}C'.format(night, expid, exptime, ccdtemp)
             fig, ax = plot_data(GFA.data[0], GFA.ivar[0], downsampling=2, label=label,
                                 stamps=stamps, colorhist=True)
-            plt.savefig(framepath / 'frame_{0}_{1}.{2}'.format(camera, expid, img_format), quality=80)
+            plt.savefig(framepath / 'frame_{0}_{1}.{2}'.format(camera, expid, img_format),
+                        pil_kwargs=dict(quality=80))
             plt.close(fig)
         return result
 
