@@ -285,7 +285,7 @@ def process(inpath, args, pool=None, pool_timeout=5):
         logging.error('Non-existant path: {0}'.format(inpath))
         return
     if args.dry_run:
-        logging.info(f'dry run: {inpath}')
+        print(f'{inpath}')
         return
     # Is this a skycam exposure?
     if inpath.name.startswith('sky'):
