@@ -360,9 +360,13 @@ def process(inpath, args, pool=None, pool_timeout=5):
     logging.info('Processing {0} from {1}'.format(cameras, inpath))
     results = {}
     framepath = outpath if args.save_frames else None
+    only_cameras = [] if args.only_cameras is None else args.only_cameras.split(',')
     for camera in cameras.split(','):
         if camera not in GFA.gfa_names:
             logging.warning('Ignoring invalid camera name in header: "{0}".'.format(camera))
+            continue
+        if len(only_cameras) > 0 and camera not in only_cameras:
+            logging.info('Skipping {0} because only-cameras is "{1}".'.format(camera, args.only_cameras))
             continue
         if guiding and camera.startswith('FOCUS'):
             # Guiding exposures do not record FOCUS data.
@@ -488,6 +492,8 @@ def gfadiq():
         help='Also process sky camera data')
     parser.add_argument('--sky-only', action='store_true',
         help='Only process sky camera data')
+    parser.add_argument('--only-cameras', type=str, default=None,
+        help='Only analyze data from these comma-separated cameras')
     parser.add_argument('--dry-run', action='store_true',
         help='Print file names only with no further processing')
     parser.add_argument('--overwrite', action='store_true',
