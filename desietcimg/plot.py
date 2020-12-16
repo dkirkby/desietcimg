@@ -679,7 +679,7 @@ def plot_image_quality(stacks, meta, size=33, zoom=5, pad=2, dpi=128, interpolat
         localtime = datetime.datetime(2019, 1, 1) + datetime.timedelta(days=meta['MJD-OBS'] - 58484.0, hours=-7)
         ax.text(0.5, 0.26, localtime.strftime('%H:%M:%S'), transform=ax.transAxes, fontsize=12, color='k',
                 verticalalignment='bottom', horizontalalignment='center')
-        ax.text(0.5, 0.17, 'local', transform=ax.transAxes, fontsize=8, color='gray',
+        ax.text(0.5, 0.17, 'local = UTC-7', transform=ax.transAxes, fontsize=8, color='gray',
                 verticalalignment='bottom', horizontalalignment='center')
     if 'EXPTIME' in meta:
         ax.text(0.5, 0.01, '{0:.1f}s'.format(meta['EXPTIME']), transform=ax.transAxes, fontsize=12, color='k',
