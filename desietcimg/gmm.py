@@ -442,6 +442,9 @@ class GMMFit(object):
                         if result.fun < best_nll:
                             best_nll = result.fun
                             best_params, best_result = final_params, result
+                            if best_nll < threshold:
+                                logging.info(f'reached threshold {best_nll:.3f} < {threshold} with ngauss={ngauss}')
+                                return best_params
                         break
             if ngauss == 1 and max_ndrop > 0:
                 # Calculate the best-fit single Gaussian model.
@@ -453,8 +456,12 @@ class GMMFit(object):
                 ndrop = np.count_nonzero(drop)
                 logging.info(f'Dropping {ndrop} pixels with chisq {chisq[drop]}')
                 ivar[drop.reshape(data.shape)] = 0
-        logging.info(f'best nll={best_nll:.4f} with ngauss={ngauss}')
-
+                # Recalcuate the nll
+                nll = np.sum((ivar * (data - model) ** 2)) / data.size
+                if nll < threshold:
+                    logging.info(f'reached threshold {best_nll:.3f} < {threshold} with ngauss={ngauss}')
+                    return best_params
+        logging.info(f'best nll={best_nll:.3f} but never reached threshold')
         return None if best_nll == np.inf else best_params
 
     def dither(self, params, xdither, ydither):
