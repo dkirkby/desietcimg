@@ -8,7 +8,7 @@ import desietcimg.util
 
 class GMMFit(object):
 
-    def __init__(self, x1_edges, x2_edges):
+    def __init__(self, x1_edges, x2_edges, rhomax=0.9, rhoprior_power=0):
         """
         Initialize a Gaussian mixture model fitter.
 
@@ -20,6 +20,12 @@ class GMMFit(object):
         x2_edges : array
             1D array of n2+1 increasing values that specify the pixel edges
             along the x2 direction.
+        rhomax : float
+            Maximum absolute value of correlation coefficients used in a fit.
+        rhoprior_power : float
+            Power of the Beta distribution used as a prior no correlation
+            coefficients in a fit.  Set to zero for no prior. Default is
+            zero since this needs more testing.
         """
         self.x1_edges = np.asarray(x1_edges, dtype=float)
         self.x2_edges = np.asarray(x2_edges, dtype=float)
@@ -29,6 +35,9 @@ class GMMFit(object):
             raise ValueError('Pixel edges are not strictly increasing.')
         # Calculate pixel areas.
         self.areas = np.diff(self.x2_edges).reshape(-1, 1) * np.diff(self.x1_edges)
+        # Save fit config.
+        self.rhomax = rhomax
+        self.rhoprior_power = rhoprior_power
 
     def gauss(self, mu1, mu2, sigma1, sigma2, rho, moments=False):
         """Calculate a single normalized Gaussian integrated over pixels.
@@ -160,8 +169,7 @@ class GMMFit(object):
         detC = S12 ** 2 - C12 ** 2
         return np.array(((sigma2 ** 2, -C12), (-C12, sigma1 ** 2))) / detC
 
-    @staticmethod
-    def transform(pin, forward=True, rhomax=0.9):
+    def transform(self, pin, forward=True):
         """Transform the model parameters to/from internal unbounded parameters.
         """
         pout = pin.copy()
@@ -172,15 +180,36 @@ class GMMFit(object):
             for k in (0, 3, 4):
                 pout[k0 + k::6] = np.exp(pin[k0 + k::6])
                 deriv[k0 + k::6] = pout[k0 + k::6]
-            pout[k0 + 5::6] = rhomax * np.tanh(pin[k0 + 5::6])
-            deriv[k0 + 5::6] = 2 * rhomax / (np.cosh(2 * pin[k0 + 5::6]) + 1)
+            pout[k0 + 5::6] = self.rhomax * np.tanh(pin[k0 + 5::6])
+            deriv[k0 + 5::6] = 2 * self.rhomax / (np.cosh(2 * pin[k0 + 5::6]) + 1)
         else:
             for k in (0, 3, 4):
                 pout[k0 + k::6] = np.log(pin[k0 + k::6])
                 deriv[k0 + k::6] = 1 / pin[k0 + k::6]
-            pout[k0 + 5::6] = np.arctanh(pin[k0 + 5::6] / rhomax)
-            deriv[k0 + 5::6] = 1 / (1 - (pin[k0 + 5::6] / rhomax) ** 2) / rhomax
+            pout[k0 + 5::6] = np.arctanh(pin[k0 + 5::6] / self.rhomax)
+            deriv[k0 + 5::6] = 1 / (1 - (pin[k0 + 5::6] / self.rhomax) ** 2) / self.rhomax
         return pout, deriv
+
+    def rho_nlprior(self, params):
+        """Evaluate -log(prior) for correlation coefficient parameters using
+        a Beta distribution prior in x = (1 + rho/rhomax) / 2 with
+        alpha = beta = power + 1. When multiple Gaussians are used, sum
+        over each one.
+
+        Returns f(p) = -log(prior) and the gradients f'(p) with respect to
+        each parameter (but only the values corresponding to rho parameters
+        will be non-zero).
+        """
+        if self.rhoprior_power == 0:
+            return 0, 0
+        nparams = len(params)
+        ngauss = nparams // 6
+        base = 1 if (nparams % 6 == 1) else 0
+        x = params[base + 5::6] / self.rhomax
+        nlprior = -self.rhoprior_power * np.sum((np.log((1 + x) / 2) + np.log((1 - x) / 2)))
+        dnlprior = np.zeros_like(params)
+        dnlprior[base + 5::6] = 2 * self.rhoprior_power / self.rhomax * x / (1 - x ** 2)
+        return nlprior, dnlprior
 
     def predict(self, params, compute_partials=False):
         """Calculate a predicted model and (optionally) its partial derivatives.
@@ -248,6 +277,9 @@ class GMMFit(object):
     def nll(self, params, data, ivar, compute_partials=False, transformed=False):
         """Calculate the negative-log-likelihood of the specified observation.
 
+        Uses a Beta distribution prior on correlation coefficients when
+        the constructor rhoprior_power is non-zero.
+
         Results are normalized per data pixel so that the output scale is
         independent of the data size, which should give more consistent
         minimization performance.
@@ -283,16 +315,22 @@ class GMMFit(object):
             # Transform from internal unbound params to model params and compute the
             # corresponding transform derivatives.
             params, derivs = self.transform(params)
+        # Compute the -log(prior).
+        nlprior, dnlprior = self.rho_nlprior(params)
         if compute_partials:
             predicted, partials = self.predict(params, compute_partials=True)
             nll_partials = 2 * np.sum(
                 ivar * (predicted - data) * partials, axis=(1, 2)) / data.size
+            # Add the -log(prior) gradients.
+            nll_partials += dnlprior / data.size
             if transformed:
                 # Transform the partial derivatives to be wrt the internal params.
                 nll_partials *= derivs
         else:
             predicted = self.predict(params, compute_partials=False)
         nll = np.sum(ivar * (predicted - data) ** 2) / data.size
+        # Add -log(prior)
+        nll += nlprior / data.size
         return (nll, nll_partials) if compute_partials else nll
 
     def minimize(self, initial_params, data, ivar, transformed=True, kwargs={}):
