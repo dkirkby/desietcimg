@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 
 import scipy.special
@@ -405,9 +407,14 @@ class GMMFit(object):
                 params[base + 5::6] = 0
                 # Try to fit.
                 for method in methods:
-                    final_params, result = self.minimize(params, data, ivar, kwargs=method)
+                    with np.errstate(all='raise'):
+                        try:
+                            final_params, result = self.minimize(params, data, ivar, kwargs=method)
+                        except FloatingPointError as e:
+                            logging.warning('minimize giving up after: {0}'.format(e))
+                            continue
 
-                    print(f'{ngauss}/{i} {method["method"]} {result.success} {result.fun:.4f} {best_nll:.4f}')
+                    logging.info(f'fit {ngauss}/{i} {method["method"]} {result.success} {result.fun:.4f} {best_nll:.4f}')
 
                     if result.success:
                         if result.fun < best_nll:
@@ -415,7 +422,7 @@ class GMMFit(object):
                             best_params, best_result = final_params, result
                         break
 
-        print(f'best nll = {best_nll:.4f}')
+        logging.info(f'best nll = {best_nll:.4f}')
         print_params(best_params)
 
         return None if best_nll == np.inf else best_params
