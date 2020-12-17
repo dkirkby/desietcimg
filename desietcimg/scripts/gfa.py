@@ -67,7 +67,7 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
     S = slice(ntrim, ntrim + stampsize)
     T, WT = T[S, S], WT[S, S]
     # Fit the PSF to a Gaussian mixture model.
-    gmm_params = GMM.fit(T, WT, ngauss=3)
+    gmm_params = GMM.fit(T, WT, maxgauss=3)
     if gmm_params is None:
         logging.error('Unable to fit PSF model')
         return

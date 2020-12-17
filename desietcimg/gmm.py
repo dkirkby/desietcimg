@@ -317,7 +317,7 @@ class GMMFit(object):
         data[mask] += rng.normal(loc=0, scale=ivar[mask] ** -0.5)
         return data, ivar
 
-    def fit(self, data, ivar, ngauss, nstart=5, sigma_min=1, sigma_max=5):
+    def fit(self, data, ivar, maxgauss, nstart=5, sigma_min=1, sigma_max=5):
         """Fit data to a mixture of Gaussians.
         """
         ny, nx = data.shape
@@ -338,39 +338,49 @@ class GMMFit(object):
         methods = (
             #dict(method='trust-krylov', jac=True, hess='2-point', options={}),
             dict(method='BFGS', jac=True, options={'gtol': 1e-2}),
-            dict(method='Nelder-Mead', options={'xatol': 1e-2, 'fatol': 1e-2, 'maxiter': ngauss * 1000}),
+            dict(method='Nelder-Mead', options={'xatol': 1e-2, 'fatol': 1e-2, 'maxiter': maxgauss * 1000}),
         )
         # Calculate the image center.
         mu1 = 0.5 * (self.x1_edges[0] + self.x1_edges[-1])
         mu2 = 0.5 * (self.x2_edges[0] + self.x2_edges[-1])
-        # Loop over random initial starting points.
-        params = np.zeros(1 + 6 * ngauss)
+        # Initialize random state for initial parameter sampling.
         rng = np.random.RandomState(seed=123)
-        nll_min = np.inf
-        for i in range(nstart):
-            params[0] = bgdensity
-            base = 1
-            # Generate random fractions.
-            frac = rng.uniform(size=ngauss)
-            # Normalize to the total signal.
-            params[base::6] = sigtot * frac / frac.sum()
-            # Set means to the stamp center.
-            params[base + 1::6] = mu1
-            params[base + 2::6] = mu2
-            # Generate random sigmas.
-            params[base + 3::6], params[base + 4::6] = rng.uniform(
-                low=sigma_min, high=sigma_max, size=(2, ngauss))
-            # Fix initial correlations to zero.
-            params[base + 5::6] = 0
-            # Try to fit.
-            for method in methods:
-                final_params, result = self.minimize(params, data, ivar, kwargs=method)
-                if result.success:
-                    if result.fun < nll_min:
-                        nll_min = result.fun
-                        best_params, best_result = final_params, result
-                    break
-        return None if nll_min == np.inf else best_params
+        best_nll = np.inf
+        # Loop over the number of Gaussians to use in the fit.
+        for ngauss in range(1, maxgauss + 1):
+            params = np.zeros(1 + 6 * ngauss)
+            # Loop over random initial starting points.
+            for i in range(nstart):
+                params[0] = bgdensity
+                base = 1
+                # Generate random fractions.
+                frac = rng.uniform(size=ngauss)
+                # Normalize to the total signal.
+                params[base::6] = sigtot * frac / frac.sum()
+                # Set means to the stamp center.
+                params[base + 1::6] = mu1
+                params[base + 2::6] = mu2
+                # Generate random sigmas.
+                params[base + 3::6], params[base + 4::6] = rng.uniform(
+                    low=sigma_min, high=sigma_max, size=(2, ngauss))
+                # Fix initial correlations to zero.
+                params[base + 5::6] = 0
+                # Try to fit.
+                for method in methods:
+                    final_params, result = self.minimize(params, data, ivar, kwargs=method)
+
+                    print(f'{ngauss}/{i} {method["method"]} {result.success} {result.fun:.4f} {best_nll:.4f}')
+
+                    if result.success:
+                        if result.fun < best_nll:
+                            best_nll = result.fun
+                            best_params, best_result = final_params, result
+                        break
+
+        print(f'best nll = {best_nll:.4f}')
+        print_params(best_params)
+
+        return None if best_nll == np.inf else best_params
 
     def dither(self, params, xdither, ydither):
         """Tabulate dithered predictions for this model at specified offsets.
