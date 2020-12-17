@@ -357,8 +357,32 @@ class GMMFit(object):
         data[mask] += rng.normal(loc=0, scale=ivar[mask] ** -0.5)
         return data, ivar
 
-    def fit(self, data, ivar, maxgauss, nstart=5, sigma_min=1, sigma_max=5):
+    def fit(self, data, ivar, maxgauss, threshold=2, nstart=5, sigma_min=1, sigma_max=5, drop_cut=20, max_ndrop=8):
         """Fit data to a mixture of Gaussians.
+
+        Parameters
+        ----------
+        data : array
+            2D arrray of pixel values to fit.
+        ivar : array
+            2D array of corresponding pixel inverse variances.
+        maxgauss : int
+            Maximum number of Gaussian components to use in the fit.
+            Start with 1 Gaussian and increment by 1 until the
+            target threshold is acheived or else maxgauss is reached.
+        threshold : float
+            Terminate immediately if any fit achieves
+            -log(likelihood) < threshold * data.size.
+        nstart : int
+            Number of random initial parameters to start the fit from
+            (for each number of Gaussians).
+        sigma_min : float
+        sigma_max : float
+            Random initial sigmas are uniform between these limits.
+        drop_cut : float
+        max_ndrop : int
+            Up to max_ndrop pixels with ivar * (data - model) ** 2 > drop_cut
+            will be removed (by setting ivar to zero) after the
         """
         ny, nx = data.shape
         # Smooth the input image.
@@ -413,17 +437,23 @@ class GMMFit(object):
                         except FloatingPointError as e:
                             logging.warning('minimize giving up after: {0}'.format(e))
                             continue
-
                     logging.info(f'fit {ngauss}/{i} {method["method"]} {result.success} {result.fun:.4f} {best_nll:.4f}')
-
                     if result.success:
                         if result.fun < best_nll:
                             best_nll = result.fun
                             best_params, best_result = final_params, result
                         break
-
-        logging.info(f'best nll = {best_nll:.4f}')
-        print_params(best_params)
+            if ngauss == 1 and max_ndrop > 0:
+                # Calculate the best-fit single Gaussian model.
+                model = self.predict(best_params)
+                # Identify pixels to drop.
+                chisq = (ivar * (data - model) ** 2).reshape(-1)
+                rank = chisq.size - np.argsort(np.argsort(chisq))
+                drop = (rank <= max_ndrop) & (chisq > drop_cut)
+                ndrop = np.count_nonzero(drop)
+                logging.info(f'Dropping {ndrop} pixels with chisq {chisq[drop]}')
+                ivar[drop.reshape(data.shape)] = 0
+        logging.info(f'best nll={best_nll:.4f} with ngauss={ngauss}')
 
         return None if best_nll == np.inf else best_params
 
