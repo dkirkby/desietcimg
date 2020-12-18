@@ -139,7 +139,7 @@ def process_guide_sequence(stars, exptime, maxdither=3, ndither=31, zoomdither=2
     return Dsum, WDsum, Msum, fit_params, gmm_params
 
 
-def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath,
+def process_one(inpath, night, expid, guiding, camera, mjdobs, exptime, ccdtemp, framepath,
                 stars, maxdither, ndither):
     """Process a single camera of a single exposure.
 
@@ -186,9 +186,23 @@ def process_one(inpath, night, expid, guiding, camera, exptime, ccdtemp, framepa
                 if stars_result is not None and framepath is not None:
                     Dsum, WDsum, Msum, fit_params, gmm_params = stars_result
                     fig, ax = plot_guide_stars(Dsum, WDsum, Msum, fit_params, night, expid, camera)
-                    plt.savefig(framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format),
-                                pil_kwargs=dict(quality=80))
+                    fname = framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format)
+                    plt.savefig(fname, pil_kwargs=dict(quality=80))
                     plt.close(fig)
+                    logging.info('Wrote {0}'.format(fname))
+                    # Write a CSV file of per-frame median results for this GFA.
+                    med_params = np.nanmedian(fit_params, axis=0)
+                    nexp, npar = med_params.shape
+                    assert nexp == len(exptime) - 1
+                    fname = framepath / 'guide_{0}_{1}.csv'.format(camera, expid)
+                    with open(fname, 'w') as out:
+                        for iexp in range(nexp):
+                            mjd = mjdobs[iexp + 1] + 0.5 * exptime[iexp + 1] / 86400
+                            print(mjd, file=out, end='')
+                            for ipar in range(npar):
+                                print(',{0}'.format(med_params[iexp, ipar]), file=out, end='')
+                            print('', file=out)
+                        logging.info('Wrote {0}'.format(fname))
                 result = GFA.psf_stack, stars_result
             else:
                 result = GFA.psf_stack, None
@@ -244,7 +258,7 @@ def process_sky(inpath, outpath):
                     continue
                 if camera + 'T' in hdus:
                     meta = hdus[camera + 'T'].read()
-                    mjd = meta['MJD-OBS']
+                    mjd = meta['MJD-OBS'] + 0.5 * exptime / 86400
                 else:
                     logging.warn('Missing {0} HDU so MJD=0'.format(camera+'T'))
                     mjd = np.zeros(nframes)
@@ -374,14 +388,15 @@ def process(inpath, args, pool=None, pool_timeout=5):
         # Fetch this camera's CCD temperatures and exposure times.
         stars = None
         if guiding:
-            info = fitsio.read(str(inpath), ext=camera + 'T', columns=('EXPTIME', 'GCCDTEMP'))
+            info = fitsio.read(str(inpath), ext=camera + 'T', columns=('MJD-OBS', 'EXPTIME', 'GCCDTEMP'))
             if args.guide_stars:
                 stars = stars_expected.get(camera)
         else:
             info = fitsio.read_header(str(inpath), ext=camera)
+        mjdobs = info['MJD-OBS']
         exptime = info['EXPTIME']
         ccdtemp = info['GCCDTEMP']
-        process_args = (inpath, night, expid, guiding, camera, exptime, ccdtemp, framepath,
+        process_args = (inpath, night, expid, guiding, camera, mjdobs, exptime, ccdtemp, framepath,
                         stars, args.max_dither, args.num_dither)
         if pool is None:
             result = process_one(*process_args)
