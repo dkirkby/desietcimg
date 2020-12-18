@@ -435,7 +435,7 @@ class GMMFit(object):
                         try:
                             final_params, result = self.minimize(params, data, ivar, kwargs=method)
                         except FloatingPointError as e:
-                            logging.warning('minimize giving up after: {0}'.format(e))
+                            logging.info('minimize giving up after: {0}'.format(e))
                             continue
                     logging.info(f'fit {ngauss}/{i} {method["method"]} {result.success} {result.fun:.4f} {best_nll:.4f}')
                     if result.success:
@@ -454,12 +454,12 @@ class GMMFit(object):
                 rank = chisq.size - np.argsort(np.argsort(chisq))
                 drop = (rank <= max_ndrop) & (chisq > drop_cut)
                 ndrop = np.count_nonzero(drop)
-                logging.info(f'Dropping {ndrop} pixels with chisq {chisq[drop]}')
+                logging.info(f'Dropping {ndrop} pixels with chisq > {drop_cut}')
                 ivar[drop.reshape(data.shape)] = 0
                 # Recalcuate the nll
                 nll = np.sum((ivar * (data - model) ** 2)) / data.size
                 if nll < threshold:
-                    logging.info(f'reached threshold {best_nll:.3f} < {threshold} with ngauss={ngauss}')
+                    logging.info(f'Reached threshold {nll:.3f} < {threshold} with ngauss={ngauss} after drops.')
                     return best_params
         logging.info(f'best nll={best_nll:.3f} but never reached threshold')
         return None if best_nll == np.inf else best_params
