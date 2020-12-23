@@ -19,6 +19,7 @@ setup(
             'etccalib=desietcimg.scripts.calib:etccalib',
             'gfadiq=desietcimg.scripts.gfa:gfadiq',
             'etcserve=desietcimg.scripts.webserve:webserve',
+            'etcdepth=desietcimg.scripts.etcdepth:main',
         ],
     }
 )
