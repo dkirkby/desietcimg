@@ -1,51 +1,112 @@
 """Interact with the online database at KPNO or its NERSC mirror.
 
-Importing this module requires that the following packages are installed:
- - pyyaml
- - pandas
- - psycopg2
+Importing this module requires that the pandas package is installed.
+Creating a DB() instance will either require that pyyaml and psycopg2
+are installed (for a direct connection), or else that requests is installed
+(for an indirect http connection).
 """
 import collections
-import yaml
 import datetime
 import os.path
+import logging
+import io
 
 import numpy as np
 
 import pandas as pd
-import psycopg2
 
+try:
+    import requests
+except ImportError:
+    # We will flag this later if it matters.
+    pass
 
-db_config = None
 
 class DB(object):
     """Initialize a connection to the database.
 
+    To force a direct connection using pyscopg2, set ``http_fallback``
+    to ``False``. To force an indirect http connection using requests,
+    set ``config_name`` to ``None``.  By default, will attempt a
+    direct connection then fall back to an indirect connection.
+
+    Direct connection parameters are stored in the SiteLite package.
+
+    An indirect connection reads authentication credentials from
+    your ~/.netrc file. Refer to this internal trac page for details:
+    https://desi.lbl.gov/trac/wiki/Computing/AccessNerscData#ProgrammaticAccess
+
     Parameters
     ----------
     config_path : str
-        Path of yaml file containing connection parameters to use.
+        Path of yaml file containing direct connection parameters to use.
+    http_fallback : bool
+        Use an indirect http connection when a direct connection fails
+        if True.
     """
-    def __init__(self, config_name='db.yaml'):
-        global db_config
-        if db_config is None:
-            if not os.path.exists(config_name):
-                raise RuntimeError('Missing db config file: {0}.'.format(config_name))
+    def __init__(self, config_name='db.yaml', http_fallback=True):
+        self.method = 'indirect'
+        if os.path.exists(config_name):
+            # Try a direct connection.
+            try:
+                import yaml
+            except ImportError:
+                raise RuntimeError('The pyyaml package is not installed.')
             with open(config_name, 'r') as f:
                 db_config = yaml.safe_load(f)
-        self.conn = psycopg2.connect(**db_config)
+            try:
+                import psycopg2
+                self.conn = psycopg2.connect(**db_config)
+                self.method = 'direct'
+            except ImportError:
+                if not http_fallback:
+                    raise RuntimeError('The psycopg2 package is not installed.')
+            except Exception as e:
+                if not http_fallback:
+                    raise RuntimeError(f'Unable to establish a database connection:\n{e}')
+        if self.method == 'indirect' and http_fallback:
+            try:
+                import requests
+            except ImportError:
+                raise RuntimeError('The requests package is not installed.')
+        logging.info(f'Established {self.method} database connection.')
     def query(self, sql, dates=None):
+        if self.method != 'direct':
+            raise RuntimeError('SQL only supported for a direct connection.')
         return pd.read_sql(sql, self.conn, parse_dates=dates)
     def select(self, table, what, where=None, limit=10, order=None, dates=None):
-        sql = f'select {what} from {table}'
-        if where is not None:
-            sql += f' where {where}'
-        if order is not None:
-            sql += f' order by {order}'
-        if limit is not None:
-            sql += f' limit {limit}'
-        return self.query(sql, dates)
-
+        if self.method == 'direct':
+            sql = f'select {what} from {table}'
+            if where is not None:
+                sql += f' where {where}'
+            if order is not None:
+                sql += f' order by {order}'
+            if limit is not None:
+                sql += f' limit {limit}'
+            return self.query(sql, dates)
+        else:
+            url = 'https://replicator.desi.lbl.gov/QE/DESI/app/query'
+            params = dict(
+                dbname='desi',
+                tables=table,
+                columns=what,
+                maxrows=limit,
+                output_type='text,', # specify CSV
+                #dsid=3, # is this necessary? what is it??
+            )
+            if where:
+                params['wheres'] = where
+            if order:
+                params['orders'] = order
+            logging.debug(f'indirect query params: {params}')
+            req = requests.get(url, params=params)
+            if req.status_code != requests.codes.ok:
+                logging.warning(f'HTTP status {req.status_code}')
+                req.raise_for_status()
+            df = pd.read_csv(io.StringIO(req.text), parse_dates=dates)
+            # Note that the server adds a comma to the end of each line, including the header,
+            # so there will be a final un-named column with empty values.  Drop it here.
+            return df.iloc[:, :-1]
 
 class Exposures(object):
     """Cacheing wrapper class for the exposure database.
@@ -54,6 +115,7 @@ class Exposures(object):
         # Run a test query.
         test = db.select('exposure.exposure', columns, limit=1)
         self.columns = list(test.columns)
+        logging.debug(f'exposure table columns: {self.columns}')
         self.what = ','.join(self.columns)
         self.db = db
         self.cache = collections.OrderedDict()
