@@ -440,14 +440,16 @@ def process(inpath, args, pool=None, pool_timeout=300):
                 hdus.write(np.stack((Dsum, WDsum, Msum)).astype(np.float32), extname=camera + 'G')
                 hdus.write(fit_params.astype(np.float32), extname=camera + 'P')
                 hdus.write(gmm_params.astype(np.float32), extname=camera + 'M')
-    # Produce a summary plot of the delivered image quality measured from the first image.
-    fig = plot_image_quality({camera: result[0] for camera, result in results.items()}, meta)
-    # Save the summary plot.
-    figpath = outpath / 'gfadiq_{0}.png'.format(expid)
-    plt.savefig(figpath)
-    plt.close(fig)
-    logging.info('Wrote {0}'.format(figpath))
-
+    try:
+        # Produce a summary plot of the delivered image quality measured from the first image.
+        fig = plot_image_quality({camera: result[0] for camera, result in results.items()}, meta)
+        # Save the summary plot.
+        figpath = outpath / 'gfadiq_{0}.png'.format(expid)
+        plt.savefig(figpath)
+        plt.close(fig)
+        logging.info('Wrote {0}'.format(figpath))
+    except Exception as e:
+        logging.warning('Failed to create image quality plot.')
 
 def get_gfa_exposures(inpath, checkpath, night, expstart=None, expstop=None, sky=False, gfa=True):
     """Return a list of existing paths to completed GFA exposures for night.
