@@ -291,7 +291,7 @@ def process_sky(inpath, outpath):
     plt.close(fig)
 
 
-def process(inpath, args, pool=None, pool_timeout=5):
+def process(inpath, args, pool=None, pool_timeout=300):
     """Process a single GFA exposure.
     """
     global GFA
