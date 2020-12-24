@@ -338,7 +338,7 @@ def process(inpath, args, pool=None, pool_timeout=300):
         PlateMaker, GuiderExpected = None, None
         try:
             GuiderExpected, _, _ = load_guider_centroids(inpath.parent, expid)
-        except ValueError:
+        except (ValueError, KeyError):
             logging.warning('Guider centroids json file not readable.')
         try:
             PlateMaker = fitsio.read(str(inpath), ext='PMGSTARS')
