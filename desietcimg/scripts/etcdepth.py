@@ -11,10 +11,21 @@ def etcdepth(args):
     # Initialize online database access.
     db = desietcimg.db.DB(http_fallback=not args.direct)
     # Connect to the exposures table.
-    exposures = desietcimg.db.Exposures(db, 'id,night,exptime,mjd_obs')
-    # Do a small test request.
-    info = exposures(69409)
-    print(info)
+    expdb = desietcimg.db.Exposures(db, 'id,night,tileid,exptime,mjd_obs,program')
+    # Determine the list of tiles to process.
+    tiles = set(args.tiles.split(','))
+    try:
+        numeric = all([int(tile) > 0 for tile in tiles])
+    except ValueError:
+        numeric = False
+    if not numeric:
+        if args.tiles == 'SV1':
+            sv1 = expdb.select(maxrows=1000, night=(20201201,None), exptime=(45,None), program='SV%')
+            print(sv1)
+            tiles = set(sv1['tileid'])
+        else:
+            raise ValueError(f'Cannot interpret --tiles {args.tiles}')
+    print(tiles)
 
 
 def main():
@@ -25,11 +36,13 @@ def main():
     parser.add_argument('-v', '--verbose', action='store_true',
         help='provide verbose output on progress')
     parser.add_argument('--logpath', type=str, metavar='PATH',
-        help='Path where logging output should be written')
+        help='path where logging output should be written')
     parser.add_argument('--debug', action='store_true',
-        help='Print traceback and enter debugger after an exception')
+        help='print traceback and enter debugger after an exception')
     parser.add_argument('--direct', action='store_true',
-        help='Database connection must be direct')
+        help='database connection must be direct')
+    parser.add_argument('--tiles', type=str,
+        help='comma-separated list of tiles or a predefined name like SV1')
     args = parser.parse_args()
 
     # Configure logging.
