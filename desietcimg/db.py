@@ -71,54 +71,95 @@ class DB(object):
                 raise RuntimeError('The requests package is not installed.')
         logging.info(f'Established {self.method} database connection.')
 
-    def query(self, sql, dates=None):
-        """Perform a direct query using arbitrary SQL. Returns a pandas dataframe."""
-        if self.method != 'direct':
-            raise RuntimeError('SQL only supported for a direct connection.')
-        return pd.read_sql(sql, self.conn, parse_dates=dates)
+    def query(self, sql, maxrows=10, dates=None):
+        """Perform a query using arbitrary SQL. Returns a pandas dataframe.
+        """
+        logging.debug(f'SQL: {sql}')
+        if 'limit ' in sql.lower():
+            raise ValueError('Must specify SQL LIMIT using maxrows.')
+        if self.method == 'direct':
+            return pd.read_sql(sql + f' LIMIT {maxrows}', self.conn, parse_dates=dates)
+        else:
+            return self.indirect(dict(sql_statement=sql, maxrows=maxrows), dates)
 
-    def fetch(self, params, dates=None):
+    def indirect(self, params, dates=None):
         """Perform an indirect query using an HTTP request. Returns a pandas dataframe."""
         url = 'https://replicator.desi.lbl.gov/QE/DESI/app/query'
+        params['dbname'] = 'desi'
+        # Use tab-separated output since the web interface does not escape embedded
+        # special characters, and there are instances of commas in useful
+        # string columns like PROGRAM.
+        #params['output_type'] = 'text,' # comma separated
+        params['output_type'] = 'text' # tab separated
+        logging.debug(f'INDIRECT PARAMS: {params}')
         req = requests.get(url, params=params)
         if req.status_code != requests.codes.ok:
-            logging.warning(f'HTTP status {req.status_code}')
+            if req.status_code == 401:
+                raise RuntimeError('Authentication failed: have you setup your .netrc file?')
             req.raise_for_status()
-        df = pd.read_csv(io.StringIO(req.text), parse_dates=dates)
-        # The server adds a comma to the end of each line, including the header,
-        # so there will be a final un-named column with empty values.  Drop it here.
-        return df.iloc[:, :-1]
+        # The server response ends each line with "\t\r\n" so we replace that with "\n" here.
+        text = req.text.replace('\t\r\n', '\n')
+        return pd.read_csv(io.StringIO(text), sep='\t', parse_dates=dates)
 
-    def select(self, table, what, where=None, limit=10, order=None, dates=None):
-        if self.method == 'direct':
-            sql = f'select {what} from {table}'
-            if where is not None:
-                sql += f' where {where}'
-            if order is not None:
-                sql += f' order by {order}'
-            if limit is not None:
-                sql += f' limit {limit}'
-            return self.query(sql, dates)
-        else:
-            params = dict(
-                dbname='desi',
-                tables=table,
-                columns=what,
-                maxrows=limit,
-                output_type='text,', # specify CSV
-            )
-            if where:
-                params['wheres'] = where
-            if order:
-                params['orders'] = order
-            return self.fetch(params, dates)
+    @staticmethod
+    def where(kwargs):
+        """Prepare a where clause to use with select. Each keyword argument
+
+        column = spec
+
+        specifies how a column should be filtered according to:
+
+        123       : = 123
+        'abc'     : = '123'
+        'abc%'    : LIKE 'abc%'
+        (lo,hi)   : BETWEEN lo AND hi
+        (None,hi) : <= hi
+        (lo,None) : >= lo
+
+        Returns a string suitable for passing to the where arg of select.
+        """
+        where = []
+        for col, spec in kwargs.items():
+            col = col.lower()
+            try:
+                # Try to interpret spec as a range (lo,hi)
+                lo, hi = spec
+                assert lo is None or hi is None or lo < hi
+                if lo == None:
+                    where.append(f'{col}<={hi}')
+                elif hi == None:
+                    where.append(f'{col}>={lo}')
+                else:
+                    where.append(f'({col} BETWEEN {lo} AND {hi})')
+            except (ValueError,TypeError,AssertionError):
+                try:
+                    # Try to interpret spec as a string.
+                    has_wildcard = any([wc in spec for wc in '%_'])
+                    if has_wildcard:
+                        where.append(f"{col} LIKE '{spec}'")
+                    else:
+                        where.append(f"{col}='{spec}'")
+                except TypeError:
+                    # Assume that spec is a single numeric value.
+                    where.append(f'{col}={spec}')
+        return ' AND '.join(where)
+
+    def select(self, table, what, where=None, maxrows=10, order=None, dates=None):
+        sql = f'select {what} from {table}'
+        if where is not None:
+            sql += f' where {where}'
+        if order is not None:
+            sql += f' order by {order}'
+        return self.query(sql, maxrows, dates)
+
 
 class Exposures(object):
     """Cacheing wrapper class for the exposure database.
+    Note that the exposures table uses 'ID' for the exposure id (not EXPID).
     """
     def __init__(self, db, columns='*', cachesize=5000):
         # Run a test query.
-        test = db.select('exposure.exposure', columns, limit=1)
+        test = db.select('exposure.exposure', columns, maxrows=1)
         self.columns = list(test.columns)
         logging.debug(f'exposure table columns: {self.columns}')
         self.what = ','.join(self.columns)
@@ -145,6 +186,12 @@ class Exposures(object):
         if what is None:
             return values
         return values[self.columns.index(what)]
+
+    def select(self, maxrows=10, **kwargs):
+        """Get exposures selected by where. Results are not cached.
+        """
+        where = self.db.where(kwargs)
+        return self.db.select('exposure.exposure', self.what, where=where, maxrows=maxrows)
 
 
 class NightTelemetry(object):
