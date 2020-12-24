@@ -446,7 +446,7 @@ class GMMFit(object):
                                 logging.info(f'reached threshold {best_nll:.3f} < {threshold} with ngauss={ngauss}')
                                 return best_params
                         break
-            if ngauss == 1 and max_ndrop > 0:
+            if best_nll != np.inf and ngauss == 1 and max_ndrop > 0:
                 # Calculate the best-fit single Gaussian model.
                 model = self.predict(best_params)
                 # Identify pixels to drop.
