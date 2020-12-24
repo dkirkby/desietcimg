@@ -70,10 +70,25 @@ class DB(object):
             except ImportError:
                 raise RuntimeError('The requests package is not installed.')
         logging.info(f'Established {self.method} database connection.')
+
     def query(self, sql, dates=None):
+        """Perform a direct query using arbitrary SQL. Returns a pandas dataframe."""
         if self.method != 'direct':
             raise RuntimeError('SQL only supported for a direct connection.')
         return pd.read_sql(sql, self.conn, parse_dates=dates)
+
+    def fetch(self, params, dates=None):
+        """Perform an indirect query using an HTTP request. Returns a pandas dataframe."""
+        url = 'https://replicator.desi.lbl.gov/QE/DESI/app/query'
+        req = requests.get(url, params=params)
+        if req.status_code != requests.codes.ok:
+            logging.warning(f'HTTP status {req.status_code}')
+            req.raise_for_status()
+        df = pd.read_csv(io.StringIO(req.text), parse_dates=dates)
+        # The server adds a comma to the end of each line, including the header,
+        # so there will be a final un-named column with empty values.  Drop it here.
+        return df.iloc[:, :-1]
+
     def select(self, table, what, where=None, limit=10, order=None, dates=None):
         if self.method == 'direct':
             sql = f'select {what} from {table}'
@@ -85,28 +100,18 @@ class DB(object):
                 sql += f' limit {limit}'
             return self.query(sql, dates)
         else:
-            url = 'https://replicator.desi.lbl.gov/QE/DESI/app/query'
             params = dict(
                 dbname='desi',
                 tables=table,
                 columns=what,
                 maxrows=limit,
                 output_type='text,', # specify CSV
-                #dsid=3, # is this necessary? what is it??
             )
             if where:
                 params['wheres'] = where
             if order:
                 params['orders'] = order
-            logging.debug(f'indirect query params: {params}')
-            req = requests.get(url, params=params)
-            if req.status_code != requests.codes.ok:
-                logging.warning(f'HTTP status {req.status_code}')
-                req.raise_for_status()
-            df = pd.read_csv(io.StringIO(req.text), parse_dates=dates)
-            # Note that the server adds a comma to the end of each line, including the header,
-            # so there will be a final un-named column with empty values.  Drop it here.
-            return df.iloc[:, :-1]
+            return self.fetch(params, dates)
 
 class Exposures(object):
     """Cacheing wrapper class for the exposure database.
@@ -122,6 +127,8 @@ class Exposures(object):
         self.cachesize = cachesize
 
     def __call__(self, expid, what=None):
+        """Lookup a single exposure and cache the results.
+        """
         if what is not None and what not in self.columns:
             raise ValueError(f'Invalid column name: "{what}".')
         if expid not in self.cache:
