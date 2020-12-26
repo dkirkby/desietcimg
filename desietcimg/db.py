@@ -102,7 +102,7 @@ class DB(object):
         return pd.read_csv(io.StringIO(text), sep='\t', parse_dates=dates)
 
     @staticmethod
-    def where(kwargs):
+    def where(**kwargs):
         """Prepare a where clause to use with select. Each keyword argument
 
         column = spec
@@ -187,10 +187,9 @@ class Exposures(object):
             return values
         return values[self.columns.index(what)]
 
-    def select(self, maxrows=10, **kwargs):
+    def select(self, where, maxrows=10):
         """Get exposures selected by where. Results are not cached.
         """
-        where = self.db.where(kwargs)
         return self.db.select('exposure.exposure', self.what, where=where, maxrows=maxrows)
 
 
