@@ -5,7 +5,48 @@ import traceback
 import sys
 from pathlib import Path
 
+import numpy as np
+
 import desietcimg.db
+
+
+def load_etc_sky(name, exptime):
+    """Read the ETC results for a sky camera exposure from a CSV file.
+    Return arrays of MJD and relative flux values.
+    """
+    data = np.loadtxt(
+        name, delimiter=',', dtype=
+        {'names':('camera','frame','mjd','flux','dflux','chisq','nfiber'),
+            'formats':('S7','i4','f8','f4','f4','f4','i4')})
+    # Calculate a weighted average of sky camera flux in each frame.
+    frames = np.unique(data['frame'])
+    nframe = len(frames)
+    if not np.all(frames == np.arange(nframe)):
+        logging.warning(f'Unexpected sky frames in {name}')
+        return None, None
+    mjd = np.empty(nframe)
+    flux = np.empty(nframe)
+    for frame in frames:
+        sel = data['frame'] == frame
+        # Calculate sky exposure midpoint.
+        mjd[frame] = np.mean(data['mjd'][sel]) + 0.5 * exptime / 86400
+        ivar = data['dflux'][sel] ** -0.5
+        # Calculate ivar-weighted mean flux.
+        flux[frame] = np.sum(ivar * data['flux'][sel]) / np.sum(ivar)
+    return mjd, flux
+
+
+def load_etc_gfa(names, exptime):
+    mjd, transp, ffrac = [], [], []
+    for name in names:
+        data = np.loadtxt(name, delimiter=',', dtype=
+            {'names':('mjd','dx','dy','transp','ffrac','nll'),
+             'formats': ('f8','f4','f4','f4','f4','f4')})
+        # Calculate the median over GFA cameras in each frame.
+        mjd.append(np.mean(data['mjd'], axis=0))
+        transp.append(np.nanmedian(data['transp'], axis=0))
+        ffrac.append(np.nanmedian(data['ffrac'], axis=0))
+    return np.array(mjd), np.array(transp), np.array(ffrac)
 
 
 def etcdepth(args):
@@ -16,7 +57,7 @@ def etcdepth(args):
     # Initialize online database access.
     db = desietcimg.db.DB(http_fallback=not args.direct)
     # Connect to the exposures table.
-    expdb = desietcimg.db.Exposures(db, 'id,night,tileid,exptime,mjd_obs,program')
+    expdb = desietcimg.db.Exposures(db, 'id,night,tileid,exptime,skytime,guidtime,mjd_obs,program')
     # Determine the list of tiles to process.
     tiles = set(args.tiles.split(','))
     try:
@@ -41,12 +82,25 @@ def etcdepth(args):
             night = str(row['night'])
             expid = row['id']
             exptag = f'{expid:08d}'
+            mjd_spectro = row['mjd_obs']
+            exptime_spectro = row['exptime']
+            exptime_sky = row['skytime']
+            exptime_gfa = row['guidtime']
             etc = etcpath / night / exptag
             if not etc.exists():
                 logging.error(f'Missing ETC exposure data for {night}/{exptag}')
             sky = etc / f'sky_{exptag}.csv'
-            if not sky.exists():
+            if sky.exists():
+                mjd_sky, flux_sky = load_etc_sky(sky, exptime_sky)
+            else:
                 logging.warning(f'Missing ETC sky data for {night}/{exptag}')
+                mjd_sky, flux_sky = None, None
+            gfas = sorted(etc.glob(f'guide_GUIDE?_{exptag}.csv'))
+            if gfas:
+                mjd_gfa, transp_gfa, ffrac_gfa = load_etc_gfa(gfas, exptime_gfa)
+            else:
+                logging.warning(f'Missing ETC guide data for {night}/{exptag}')
+                mjd_gfa, transp_gfa, ffrac_gfa = None, None, None
 
 
 def main():
