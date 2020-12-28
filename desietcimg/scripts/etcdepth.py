@@ -8,8 +8,13 @@ from pathlib import Path
 
 import numpy as np
 
+import fitsio
+
 import desietcimg.db
 import desietcimg.spectro
+
+
+# TODO: propagate actual GFA, SKY exposure times from FITS file
 
 
 def load_etc_sky(name, exptime):
@@ -33,8 +38,8 @@ def load_etc_sky(name, exptime):
         # Calculate sky exposure midpoint.
         mjd[frame] = np.mean(data['mjd'][sel]) + 0.5 * exptime / 86400
         ivar = data['dflux'][sel] ** -0.5
-        # Calculate ivar-weighted mean flux.
-        flux[frame] = np.sum(ivar * data['flux'][sel]) / np.sum(ivar)
+        # Calculate ivar-weighted mean relative flux.
+        flux[frame] = np.sum(ivar * data['flux'][sel]) / np.sum(ivar) / exptime
     return mjd, flux
 
 
@@ -45,17 +50,43 @@ def load_etc_gfa(names, exptime):
             {'names':('mjd','dx','dy','transp','ffrac','nll'),
              'formats': ('f8','f4','f4','f4','f4','f4')})
         # Calculate the median over GFA cameras in each frame.
-        mjd.append(np.mean(data['mjd'], axis=0))
+        mjd.append(np.mean(data['mjd'], axis=0) + 0.5 * exptime / 86400)
         transp.append(np.nanmedian(data['transp'], axis=0))
         ffrac.append(np.nanmedian(data['ffrac'], axis=0))
     return np.array(mjd), np.array(transp), np.array(ffrac)
+
+
+def load_spec_sky(names, exptime):
+    hdr_exptime = None
+    detected = {camera: desietcimg.spectro.CoAdd(camera) for camera in 'brz'}
+    for name in names:
+        camera = name.name[4]
+        assert camera in 'brz'
+        spec = int(name.name[5])
+        assert spec in range(10)
+        # Read the flat-fielded sky model in this (spectrograph, camera)
+        with fitsio.FITS(str(name)) as hdus:
+            if hdr_exptime is None:
+                hdr_exptime = hdus[0].read_header()['EXPTIME']
+                if abs(hdr_exptime - exptime) > 1:
+                    logging.warning(f'Actual exptime {hdr_exptime:.1f}s != requested {exptime:.1f}s.')
+            else:
+                if hdus[0].read_header()['EXPTIME'] != hdr_exptime:
+                    logging.error(f'Inconsistent header EXPTIME for {name}.')
+            flux = hdus['SKY'].read()
+            ivar = hdus['IVAR'].read()
+            if np.any(ivar == 0):
+                logging.warning(f'Found {np.count_nonzero(ivar == 0)} / {ivar.size} zero ivar pixels in {name}.')
+            #mask = hdus['MASK'].read()
+            # Verify that all masked pixels have zero ivar.
+            #assert np.all(ivar[mask != 0] == 0)
 
 
 def etcdepth(args):
     # Check required paths.
     DESIROOT = Path(args.desiroot or os.getenv('DESI_ROOT', '/global/cfs/cdirs/desi'))
     logging.info(f'DESIROOT={DESIROOT}')
-    SPEC = DESIROOT / 'spectro' / 'data'
+    SPEC = DESIROOT / 'spectro' / 'redux' / args.release / 'exposures'
     if not SPEC.exists():
         raise RuntimeError(f'Non-existent {SPEC}')
     logging.info(f'SPEC={SPEC}')
@@ -74,10 +105,13 @@ def etcdepth(args):
     except ValueError:
         numeric = False
     if numeric:
-        expdata = expdb.select(f'tileid IN ({args.tiles})', maxrows=1000)
+        expdata = expdb.select(
+            f"tileid IN ({args.tiles}) AND exptime>={args.min_exptime} AND night>20200100 AND flavor='science'",
+            maxrows=1000)
     elif args.tiles == 'SV1':
         expdata = expdb.select(
-            db.where(night=(20201201,None), exptime=(45,None), program='SV%'), maxrows=1000)
+            db.where(night=(20201201,None), exptime=(args.min_exptime,None), program='SV%', flavor='science'),
+            maxrows=1000)
     else:
         raise ValueError(f'Cannot interpret --tiles {args.tiles}')
     # Loop over exposures for each tile.
@@ -85,21 +119,25 @@ def etcdepth(args):
     tiles = set(expdata['tileid'])
     logging.info(f'Processing {nexp} exposures for tiles: {tiles}')
     for tile in tiles:
-        print('tile', tile)
         sel = expdata['tileid'] == tile
+        logging.info(f'tile {tile} exposures {list(expdata["id"][sel])}')
         for _, row in expdata[sel].iterrows():
-            night = str(row['night'])
-            expid = row['id']
+            night = str(int(row['night']))
+            expid = int(row['id'])
             exptag = f'{expid:08d}'
             mjd_spectro = row['mjd_obs']
             exptime_spectro = row['exptime']
             etcdir = ETC / night / exptag
+            '''
             if not etcdir.exists():
                 logging.error(f'Missing ETC exposure data for {night}/{exptag}')
             else:
                 # Process ETC data for this exposure.
                 exptime_sky = row['skytime']
                 exptime_gfa = row['guidtime']
+                if exptime_gfa is None:
+                    #logging.warning(f'Forcing GUIDTIME=5 for {night}/{exptag}')
+                    exptime_gfa = 5
                 sky = etcdir / f'sky_{exptag}.csv'
                 if sky.exists():
                     mjd_sky, flux_sky = load_etc_sky(sky, exptime_sky)
@@ -110,12 +148,18 @@ def etcdepth(args):
                     mjd_gfa, transp_gfa, ffrac_gfa = load_etc_gfa(gfas, exptime_gfa)
                 else:
                     logging.warning(f'Missing ETC guide data for {night}/{exptag}')
+            '''
             specdir = SPEC / night / exptag
             if not specdir.exists():
                 logging.error(f'Missing SPEC exposure data for {night}/{exptag}')
             else:
                 # Process SPEC data for this exposure.
-                pass
+                skys = sorted(specdir.glob(f'sky-??-{exptag}.fits'))
+                if skys:
+                    #load_spec_sky(skys, exptime_spectro)
+                    pass
+                else:
+                    logging.warning(f'Missing SPEC sky data for {night}/{exptag}.')
 
 
 def main():
@@ -131,10 +175,14 @@ def main():
         help='print traceback and enter debugger after an exception')
     parser.add_argument('--tiles', type=str,
         help='comma-separated list of tiles or a predefined name like SV1')
+    parser.add_argument('--release', type=str, default='daily',
+        help='pipeline reduction release to use')
     parser.add_argument('--desiroot', type=str, default=None,
         help='root path for locating DESI data, defaults to $DESI_ROOT')
     parser.add_argument('--etcpath', type=str, default=None,
         help='path where ETC outputs are stored, defaults to <desiroot>/ETC')
+    parser.add_argument('--min-exptime', type=float, default=100,
+        help='ignore exposures of duration less than this value')
     parser.add_argument('--direct', action='store_true',
         help='database connection must be direct')
     args = parser.parse_args()
