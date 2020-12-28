@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 import desietcimg.db
+import desietcimg.spectro
 
 
 def load_etc_sky(name, exptime):
@@ -50,6 +51,7 @@ def load_etc_gfa(names, exptime):
 
 
 def etcdepth(args):
+    desi = desietcimg.spectro.DESIRoot()
     # Check required paths.
     etcpath = Path(args.etcpath)
     if not etcpath.exists():
