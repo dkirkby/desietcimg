@@ -3,6 +3,7 @@ import logging
 import pdb
 import traceback
 import sys
+import os
 from pathlib import Path
 
 import numpy as np
@@ -51,11 +52,17 @@ def load_etc_gfa(names, exptime):
 
 
 def etcdepth(args):
-    desi = desietcimg.spectro.DESIRoot()
     # Check required paths.
-    etcpath = Path(args.etcpath)
-    if not etcpath.exists():
-        raise RuntimeError(f'Non-existent --etcpath {etcpath}')
+    DESIROOT = Path(args.desiroot or os.getenv('DESI_ROOT', '/global/cfs/cdirs/desi'))
+    logging.info(f'DESIROOT={DESIROOT}')
+    SPEC = DESIROOT / 'spectro' / 'data'
+    if not SPEC.exists():
+        raise RuntimeError(f'Non-existent {SPEC}')
+    logging.info(f'SPEC={SPEC}')
+    ETC = Path(args.etcpath or (DESIROOT / 'spectro' / 'ETC'))
+    if not ETC.exists():
+        raise RuntimeError(f'Non-existent {ETC}')
+    logging.info(f'ETC={ETC}')
     # Initialize online database access.
     db = desietcimg.db.DB(http_fallback=not args.direct)
     # Connect to the exposures table.
@@ -86,23 +93,29 @@ def etcdepth(args):
             exptag = f'{expid:08d}'
             mjd_spectro = row['mjd_obs']
             exptime_spectro = row['exptime']
-            exptime_sky = row['skytime']
-            exptime_gfa = row['guidtime']
-            etc = etcpath / night / exptag
-            if not etc.exists():
+            etcdir = ETC / night / exptag
+            if not etcdir.exists():
                 logging.error(f'Missing ETC exposure data for {night}/{exptag}')
-            sky = etc / f'sky_{exptag}.csv'
-            if sky.exists():
-                mjd_sky, flux_sky = load_etc_sky(sky, exptime_sky)
             else:
-                logging.warning(f'Missing ETC sky data for {night}/{exptag}')
-                mjd_sky, flux_sky = None, None
-            gfas = sorted(etc.glob(f'guide_GUIDE?_{exptag}.csv'))
-            if gfas:
-                mjd_gfa, transp_gfa, ffrac_gfa = load_etc_gfa(gfas, exptime_gfa)
+                # Process ETC data for this exposure.
+                exptime_sky = row['skytime']
+                exptime_gfa = row['guidtime']
+                sky = etcdir / f'sky_{exptag}.csv'
+                if sky.exists():
+                    mjd_sky, flux_sky = load_etc_sky(sky, exptime_sky)
+                else:
+                    logging.warning(f'Missing ETC sky data for {night}/{exptag}')
+                gfas = sorted(etcdir.glob(f'guide_GUIDE?_{exptag}.csv'))
+                if gfas:
+                    mjd_gfa, transp_gfa, ffrac_gfa = load_etc_gfa(gfas, exptime_gfa)
+                else:
+                    logging.warning(f'Missing ETC guide data for {night}/{exptag}')
+            specdir = SPEC / night / exptag
+            if not specdir.exists():
+                logging.error(f'Missing SPEC exposure data for {night}/{exptag}')
             else:
-                logging.warning(f'Missing ETC guide data for {night}/{exptag}')
-                mjd_gfa, transp_gfa, ffrac_gfa = None, None, None
+                # Process SPEC data for this exposure.
+                pass
 
 
 def main():
@@ -118,8 +131,10 @@ def main():
         help='print traceback and enter debugger after an exception')
     parser.add_argument('--tiles', type=str,
         help='comma-separated list of tiles or a predefined name like SV1')
-    parser.add_argument('--etcpath', type=str, required=True,
-        help='path where ETC outputs are stored')
+    parser.add_argument('--desiroot', type=str, default=None,
+        help='root path for locating DESI data, defaults to $DESI_ROOT')
+    parser.add_argument('--etcpath', type=str, default=None,
+        help='path where ETC outputs are stored, defaults to <desiroot>/ETC')
     parser.add_argument('--direct', action='store_true',
         help='database connection must be direct')
     args = parser.parse_args()
