@@ -75,11 +75,16 @@ def load_spec_sky(names, exptime):
                     logging.error(f'Inconsistent header EXPTIME for {name}.')
             flux = hdus['SKY'].read()
             ivar = hdus['IVAR'].read()
-            if np.any(ivar == 0):
-                logging.warning(f'Found {np.count_nonzero(ivar == 0)} / {ivar.size} zero ivar pixels in {name}.')
+            if np.all(ivar == 0):
+                logging.warning(f'No valid {camera}{spec} data in {name}.')
+            else:
+                detected[camera] += desietcimg.spectro.Spectrum(camera, np.median(flux, axis=0), np.median(ivar, axis=0))
             #mask = hdus['MASK'].read()
             # Verify that all masked pixels have zero ivar.
             #assert np.all(ivar[mask != 0] == 0)
+    for camera in 'brz':
+        detected[camera] /= hdr_exptime
+    return detected
 
 
 def etcdepth(args):
@@ -128,7 +133,6 @@ def etcdepth(args):
             mjd_spectro = row['mjd_obs']
             exptime_spectro = row['exptime']
             etcdir = ETC / night / exptag
-            '''
             if not etcdir.exists():
                 logging.error(f'Missing ETC exposure data for {night}/{exptag}')
             else:
@@ -148,7 +152,6 @@ def etcdepth(args):
                     mjd_gfa, transp_gfa, ffrac_gfa = load_etc_gfa(gfas, exptime_gfa)
                 else:
                     logging.warning(f'Missing ETC guide data for {night}/{exptag}')
-            '''
             specdir = SPEC / night / exptag
             if not specdir.exists():
                 logging.error(f'Missing SPEC exposure data for {night}/{exptag}')
@@ -156,8 +159,7 @@ def etcdepth(args):
                 # Process SPEC data for this exposure.
                 skys = sorted(specdir.glob(f'sky-??-{exptag}.fits'))
                 if skys:
-                    #load_spec_sky(skys, exptime_spectro)
-                    pass
+                    detected = load_spec_sky(skys, exptime_spectro)
                 else:
                     logging.warning(f'Missing SPEC sky data for {night}/{exptag}.')
 
