@@ -57,8 +57,12 @@ def load_etc_gfa(names, exptime):
 
 
 def load_spec_sky(names, exptime):
+    """Return the detected sky spectrum in each camera, coadded over spectrographs,
+    in units of fiberflat corrected elec/sec/Ang.
+    """
     hdr_exptime = None
     detected = {camera: desietcimg.spectro.CoAdd(camera) for camera in 'brz'}
+    missing = []
     for name in names:
         camera = name.name[4]
         assert camera in 'brz'
@@ -67,21 +71,29 @@ def load_spec_sky(names, exptime):
         # Read the flat-fielded sky model in this (spectrograph, camera)
         with fitsio.FITS(str(name)) as hdus:
             if hdr_exptime is None:
-                hdr_exptime = hdus[0].read_header()['EXPTIME']
+                hdr = hdus[0].read_header()
+                night = hdr['NIGHT']
+                expid = hdr['EXPID']
+                hdr_exptime = hdr['EXPTIME']
                 if abs(hdr_exptime - exptime) > 1:
                     logging.warning(f'Actual exptime {hdr_exptime:.1f}s != requested {exptime:.1f}s.')
             else:
                 if hdus[0].read_header()['EXPTIME'] != hdr_exptime:
                     logging.error(f'Inconsistent header EXPTIME for {name}.')
-            flux = hdus['SKY'].read()
-            ivar = hdus['IVAR'].read()
+            # Read only the first fiber's sky model since they are all similar.
+            # Note that this only saves a factor of ~2 relative to reading all fibers,
+            # probably because most of the overhead is uncompressing the fits.fz format.
+            flux = hdus['SKY'][0,:][0]
+            ivar = hdus['IVAR'][0,:][0]
             if np.all(ivar == 0):
-                logging.warning(f'No valid {camera}{spec} data in {name}.')
+                missing.append(f'{camera}{spec}')
             else:
-                detected[camera] += desietcimg.spectro.Spectrum(camera, np.median(flux, axis=0), np.median(ivar, axis=0))
+                detected[camera] += desietcimg.spectro.Spectrum(camera, flux, ivar)
             #mask = hdus['MASK'].read()
             # Verify that all masked pixels have zero ivar.
             #assert np.all(ivar[mask != 0] == 0)
+    if missing:
+        logging.warning(f'{night}/{expid} missing sky data for {"".join(missing)}.')
     for camera in 'brz':
         detected[camera] /= hdr_exptime
     return detected
@@ -123,6 +135,8 @@ def etcdepth(args):
     nexp = len(expdata)
     tiles = set(expdata['tileid'])
     logging.info(f'Processing {nexp} exposures for tiles: {tiles}')
+    sky_table = []
+    sky_spectra = {C:[] for C in 'brz'}
     for tile in tiles:
         sel = expdata['tileid'] == tile
         logging.info(f'tile {tile} exposures {list(expdata["id"][sel])}')
@@ -132,6 +146,21 @@ def etcdepth(args):
             exptag = f'{expid:08d}'
             mjd_spectro = row['mjd_obs']
             exptime_spectro = row['exptime']
+            specdir = SPEC / night / exptag
+            if not specdir.exists():
+                logging.error(f'Missing SPEC exposure data for {night}/{exptag}')
+                continue
+            else:
+                # Process SPEC data for this exposure.
+                skys = sorted(specdir.glob(f'sky-??-{exptag}.fits'))
+                if skys:
+                    detected = load_spec_sky(skys, exptime_spectro)
+                    # Should use actual MJD_OBS,EXPTIME instead of db request values
+                    sky_table.append((night,expid,mjd_spectro,exptime_spectro))
+                    for camera in 'brz':
+                        sky_spectra[camera].append(detected[camera].flux)
+                else:
+                    logging.warning(f'No SPEC sky data found for {night}/{exptag}.')
             etcdir = ETC / night / exptag
             if not etcdir.exists():
                 logging.error(f'Missing ETC exposure data for {night}/{exptag}')
@@ -152,16 +181,15 @@ def etcdepth(args):
                     mjd_gfa, transp_gfa, ffrac_gfa = load_etc_gfa(gfas, exptime_gfa)
                 else:
                     logging.warning(f'Missing ETC guide data for {night}/{exptag}')
-            specdir = SPEC / night / exptag
-            if not specdir.exists():
-                logging.error(f'Missing SPEC exposure data for {night}/{exptag}')
-            else:
-                # Process SPEC data for this exposure.
-                skys = sorted(specdir.glob(f'sky-??-{exptag}.fits'))
-                if skys:
-                    detected = load_spec_sky(skys, exptime_spectro)
-                else:
-                    logging.warning(f'Missing SPEC sky data for {night}/{exptag}.')
+    if args.save_sky:
+        fits = fitsio.FITS(args.save_sky, 'rw')
+        fits.write(
+            np.array(sky_table, dtype=[('night','i4'),('expid','i4'),('mjd','f8'),('exptime','f4')]),
+            extname='META')
+        for camera in 'brz':
+            fits.write(np.vstack(sky_spectra[camera]).astype(np.float32), extname=camera.upper()+'SKY')
+        fits.close()
+        logging.info(f'Saved sky spectra to {args.save_sky}.')
 
 
 def main():
@@ -185,6 +213,12 @@ def main():
         help='path where ETC outputs are stored, defaults to <desiroot>/ETC')
     parser.add_argument('--min-exptime', type=float, default=100,
         help='ignore exposures of duration less than this value')
+    parser.add_argument('--skyref', type=str, default='fiducial_sky_eso.fits',
+        help='FITS file with the fiducial zenith dark sky model to use')
+    parser.add_argument('--smoothing', type=int, default=125,
+        help='median filter smoothing to apply to sky spectrum in pixels')
+    parser.add_argument('--save-sky', type=str, default='specsky.fits',
+        help='FITS file where per-exposure sky spectra are saved')
     parser.add_argument('--direct', action='store_true',
         help='database connection must be direct')
     args = parser.parse_args()
