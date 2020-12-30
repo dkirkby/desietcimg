@@ -135,8 +135,10 @@ def etcdepth(args):
     nexp = len(expdata)
     tiles = set(expdata['tileid'])
     logging.info(f'Processing {nexp} exposures for tiles: {tiles}')
-    sky_table = []
+    all_meta = []
     sky_spectra = {C:[] for C in 'brz'}
+    sky_grid = []
+    npix = {C: len(desietcimg.spectro.fullwave[desietcimg.spectro.cslice[C]]) for C in 'brz'}
     for tile in tiles:
         sel = expdata['tileid'] == tile
         logging.info(f'tile {tile} exposures {list(expdata["id"][sel])}')
@@ -144,23 +146,25 @@ def etcdepth(args):
             night = str(int(row['night']))
             expid = int(row['id'])
             exptag = f'{expid:08d}'
+            # Should use actual MJD_OBS,EXPTIME instead of db request values
             mjd_spectro = row['mjd_obs']
             exptime_spectro = row['exptime']
+            mjd_grid = mjd_spectro + (0.5 + np.arange(args.ngrid)) / args.ngrid * exptime_spectro / 86400
             specdir = SPEC / night / exptag
             if not specdir.exists():
                 logging.error(f'Missing SPEC exposure data for {night}/{exptag}')
                 continue
+            exp_meta = (int(night), expid, mjd_spectro, exptime_spectro)
+            # Process SPEC data for this exposure.
+            skys = sorted(specdir.glob(f'sky-??-{exptag}.fits'))
+            if skys:
+                detected = load_spec_sky(skys, exptime_spectro)
+                for camera in 'brz':
+                    sky_spectra[camera].append([detected[camera].flux, detected[camera].ivar])
             else:
-                # Process SPEC data for this exposure.
-                skys = sorted(specdir.glob(f'sky-??-{exptag}.fits'))
-                if skys:
-                    detected = load_spec_sky(skys, exptime_spectro)
-                    # Should use actual MJD_OBS,EXPTIME instead of db request values
-                    sky_table.append((night,expid,mjd_spectro,exptime_spectro))
-                    for camera in 'brz':
-                        sky_spectra[camera].append(detected[camera].flux)
-                else:
-                    logging.warning(f'No SPEC sky data found for {night}/{exptag}.')
+                for camera in 'brz':
+                    sky_spectra[camera].append(np.zeros(2, npix[camera]))
+                logging.warning(f'No SPEC sky data found for {night}/{exptag}.')
             etcdir = ETC / night / exptag
             if not etcdir.exists():
                 logging.error(f'Missing ETC exposure data for {night}/{exptag}')
@@ -174,22 +178,28 @@ def etcdepth(args):
                 sky = etcdir / f'sky_{exptag}.csv'
                 if sky.exists():
                     mjd_sky, flux_sky = load_etc_sky(sky, exptime_sky)
+                    # Interpolate sky level to MJD grid.
+                    flux_sky_grid = np.interp(mjd_grid, mjd_sky, flux_sky)
+                    sky_grid.append(flux_sky_grid)
                 else:
+                    sky_grid.append(np.zeros_like(mjd_grid))
                     logging.warning(f'Missing ETC sky data for {night}/{exptag}')
                 gfas = sorted(etcdir.glob(f'guide_GUIDE?_{exptag}.csv'))
                 if gfas:
                     mjd_gfa, transp_gfa, ffrac_gfa = load_etc_gfa(gfas, exptime_gfa)
                 else:
                     logging.warning(f'Missing ETC guide data for {night}/{exptag}')
-    if args.save_sky:
-        fits = fitsio.FITS(args.save_sky, 'rw')
+            all_meta.append(exp_meta)
+    if args.save:
+        fits = fitsio.FITS(args.save, 'rw', clobber=True)
         fits.write(
-            np.array(sky_table, dtype=[('night','i4'),('expid','i4'),('mjd','f8'),('exptime','f4')]),
-            extname='META')
+            np.array(all_meta, dtype=[('night','i4'),('expid','i4'),('mjd','f8'),('exptime','f4')]),
+            extname='ETC')
         for camera in 'brz':
-            fits.write(np.vstack(sky_spectra[camera]).astype(np.float32), extname=camera.upper()+'SKY')
+            fits.write(np.array(sky_spectra[camera], np.float32), extname=camera.upper()+'SKY')
+        fits.write(np.vstack(sky_grid).astype(np.float32), extname='SKYCAM')
         fits.close()
-        logging.info(f'Saved sky spectra to {args.save_sky}.')
+        logging.info(f'Saved results to {args.save}.')
 
 
 def main():
@@ -217,10 +227,12 @@ def main():
         help='FITS file with the fiducial zenith dark sky model to use')
     parser.add_argument('--smoothing', type=int, default=125,
         help='median filter smoothing to apply to sky spectrum in pixels')
-    parser.add_argument('--save-sky', type=str, default='specsky.fits',
-        help='FITS file where per-exposure sky spectra are saved')
+    parser.add_argument('--save', type=str, default='etcdepth.fits',
+        help='FITS file where per-exposure results are saved')
     parser.add_argument('--direct', action='store_true',
         help='database connection must be direct')
+    parser.add_argument('--ngrid', type=int, default=256,
+        help='size of MJD grid for interpolating within each exposure')
     args = parser.parse_args()
 
     # Configure logging.
