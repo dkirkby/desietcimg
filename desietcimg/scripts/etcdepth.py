@@ -56,57 +56,14 @@ def load_etc_gfa(names, exptime):
     return np.array(mjd), np.array(transp), np.array(ffrac)
 
 
-def load_spec_sky(names, exptime):
-    """Return the detected sky spectrum in each camera, coadded over spectrographs,
-    in units of fiberflat corrected elec/sec/Ang.
-    """
-    hdr_exptime = None
-    detected = {camera: desietcimg.spectro.CoAdd(camera) for camera in 'brz'}
-    missing = []
-    for name in names:
-        camera = name.name[4]
-        assert camera in 'brz'
-        spec = int(name.name[5])
-        assert spec in range(10)
-        # Read the flat-fielded sky model in this (spectrograph, camera)
-        with fitsio.FITS(str(name)) as hdus:
-            if hdr_exptime is None:
-                hdr = hdus[0].read_header()
-                night = hdr['NIGHT']
-                expid = hdr['EXPID']
-                hdr_exptime = hdr['EXPTIME']
-                if abs(hdr_exptime - exptime) > 1:
-                    logging.warning(f'Actual exptime {hdr_exptime:.1f}s != requested {exptime:.1f}s.')
-            else:
-                if hdus[0].read_header()['EXPTIME'] != hdr_exptime:
-                    logging.error(f'Inconsistent header EXPTIME for {name}.')
-            # Read only the first fiber's sky model since they are all similar.
-            # Note that this only saves a factor of ~2 relative to reading all fibers,
-            # probably because most of the overhead is uncompressing the fits.fz format.
-            flux = hdus['SKY'][0,:][0]
-            ivar = hdus['IVAR'][0,:][0]
-            if np.all(ivar == 0):
-                missing.append(f'{camera}{spec}')
-            else:
-                detected[camera] += desietcimg.spectro.Spectrum(camera, flux, ivar)
-            #mask = hdus['MASK'].read()
-            # Verify that all masked pixels have zero ivar.
-            #assert np.all(ivar[mask != 0] == 0)
-    if missing:
-        logging.warning(f'{night}/{expid} missing sky data for {"".join(missing)}.')
-    for camera in 'brz':
-        detected[camera] /= hdr_exptime
-    return detected
-
-
 def etcdepth(args):
     # Check required paths.
     DESIROOT = Path(args.desiroot or os.getenv('DESI_ROOT', '/global/cfs/cdirs/desi'))
     logging.info(f'DESIROOT={DESIROOT}')
-    SPEC = DESIROOT / 'spectro' / 'redux' / args.release / 'exposures'
-    if not SPEC.exists():
-        raise RuntimeError(f'Non-existent {SPEC}')
-    logging.info(f'SPEC={SPEC}')
+    RELEASE = DESIROOT / 'spectro' / 'redux' / args.release
+    if not RELEASE.exists():
+        raise RuntimeError(f'Non-existent {RELEASE}')
+    logging.info(f'RELEASE={RELEASE}')
     ETC = Path(args.etcpath or (DESIROOT / 'spectro' / 'ETC'))
     if not ETC.exists():
         raise RuntimeError(f'Non-existent {ETC}')
@@ -136,35 +93,33 @@ def etcdepth(args):
     tiles = set(expdata['tileid'])
     logging.info(f'Processing {nexp} exposures for tiles: {tiles}')
     all_meta = []
-    sky_spectra = {C:[] for C in 'brz'}
-    sky_grid = []
-    npix = {C: len(desietcimg.spectro.fullwave[desietcimg.spectro.cslice[C]]) for C in 'brz'}
+    sky_spectra = {C:[] for C in args.cameras}
+    throughputs = {C:[] for C in args.cameras}
+    sky_grid, thru_grid = [], []
+    npix = {C: len(desietcimg.spectro.fullwave[desietcimg.spectro.cslice[C]]) for C in args.cameras}
     for tile in tiles:
         sel = expdata['tileid'] == tile
         logging.info(f'tile {tile} exposures {list(expdata["id"][sel])}')
         for _, row in expdata[sel].iterrows():
             night = str(int(row['night']))
             expid = int(row['id'])
-            exptag = f'{expid:08d}'
+            exptag = str(expid).zfill(8)
+            path = desietcimg.spectro.get_path(RELEASE, night, expid)
+            if not path.exists():
+                logging.warning(f'Missing pipeline results for {night}/{expid}.')
+                continue
+            # Get the throughput and detected sky in elec/s/angstrom for this exposure.
+            thru = desietcimg.spectro.get_thru(path)
+            sky = desietcimg.spectro.get_sky(path)
+            for c in args.cameras:
+                throughputs[c].append(thru[c])
+                sky_spectra[c].append([sky[c].flux, sky[c].ivar])
             # Should use actual MJD_OBS,EXPTIME instead of db request values
             mjd_spectro = row['mjd_obs']
             exptime_spectro = row['exptime']
             mjd_grid = mjd_spectro + (0.5 + np.arange(args.ngrid)) / args.ngrid * exptime_spectro / 86400
-            specdir = SPEC / night / exptag
-            if not specdir.exists():
-                logging.error(f'Missing SPEC exposure data for {night}/{exptag}')
-                continue
             exp_meta = (int(night), expid, mjd_spectro, exptime_spectro)
-            # Process SPEC data for this exposure.
-            skys = sorted(specdir.glob(f'sky-??-{exptag}.fits'))
-            if skys:
-                detected = load_spec_sky(skys, exptime_spectro)
-                for camera in 'brz':
-                    sky_spectra[camera].append([detected[camera].flux, detected[camera].ivar])
-            else:
-                for camera in 'brz':
-                    sky_spectra[camera].append(np.zeros(2, npix[camera]))
-                logging.warning(f'No SPEC sky data found for {night}/{exptag}.')
+            # Process any available ETC results for this exposure.
             etcdir = ETC / night / exptag
             if not etcdir.exists():
                 logging.error(f'Missing ETC exposure data for {night}/{exptag}')
@@ -187,17 +142,22 @@ def etcdepth(args):
                 gfas = sorted(etcdir.glob(f'guide_GUIDE?_{exptag}.csv'))
                 if gfas:
                     mjd_gfa, transp_gfa, ffrac_gfa = load_etc_gfa(gfas, exptime_gfa)
+                    thru_grid.append(np.interp(mjd_grid, mjd_gfa, transp_gfa * ffrac_gfa))
                 else:
+                    thru_grid.append(np.zeros_like(mjd_grid))
                     logging.warning(f'Missing ETC guide data for {night}/{exptag}')
             all_meta.append(exp_meta)
+    # Save the results.
     if args.save:
         fits = fitsio.FITS(args.save, 'rw', clobber=True)
         fits.write(
             np.array(all_meta, dtype=[('night','i4'),('expid','i4'),('mjd','f8'),('exptime','f4')]),
             extname='ETC')
-        for camera in 'brz':
+        for camera in args.cameras:
+            fits.write(np.array(throughputs[camera], np.float32), extname=camera.upper()+'THRU')
             fits.write(np.array(sky_spectra[camera], np.float32), extname=camera.upper()+'SKY')
-        fits.write(np.vstack(sky_grid).astype(np.float32), extname='SKYCAM')
+        fits.write(np.vstack(sky_grid).astype(np.float32), extname='ETCSKY')
+        fits.write(np.vstack(thru_grid).astype(np.float32), extname='ETCTHRU')
         fits.close()
         logging.info(f'Saved results to {args.save}.')
 
@@ -215,8 +175,12 @@ def main():
         help='print traceback and enter debugger after an exception')
     parser.add_argument('--tiles', type=str,
         help='comma-separated list of tiles or a predefined name like SV1')
-    parser.add_argument('--release', type=str, default='daily',
+    parser.add_argument('--release', type=str, default='blanc',
         help='pipeline reduction release to use')
+    parser.add_argument('--cameras', type=str, default='brz',
+        help='spectrograph cameras to use')
+    parser.add_argument('--badspec', type=int, nargs='*',
+        help='ignore data from these spectrographs (0-9)')
     parser.add_argument('--desiroot', type=str, default=None,
         help='root path for locating DESI data, defaults to $DESI_ROOT')
     parser.add_argument('--etcpath', type=str, default=None,
@@ -257,3 +221,7 @@ def main():
         else:
             print(e)
             sys.exit(-1)
+
+
+if __name__ == '__main__':
+    main()

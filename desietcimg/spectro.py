@@ -1,6 +1,7 @@
 """Utility functions for accessing DESI spectra for ETC calculations.
 """
 import contextlib
+import logging
 
 import numpy as np
 
@@ -79,7 +80,7 @@ class CoAdd(Spectrum):
 
 
 def iterspecs(path, ftypes='cframe', specs=range(10), cameras='brz', expid=None,
-              openfits=True, camera_first=True, missing='error'):
+              openfits=True, camera_first=True, missing='warn'):
     """Iterate over all FITS files with names <ftype>-<camera><spec>-<expid>.fits*
     Yields (hdus, camera, spec) for each file, or (fname, camera, spec) if openfits is False.
     Iterates over camera then spec if camera_first is True, otherwise spec then camera.
@@ -102,8 +103,13 @@ def iterspecs(path, ftypes='cframe', specs=range(10), cameras='brz', expid=None,
             camera, spec = info(outer, inner)
             # Build the list of file paths for this (camera,spec).
             fnames = [next(iter(path.glob(f'{ftype}-{camera}{spec}-{expid}.fits*')), None) for ftype in ftypes]
-            if None in fnames and missing == 'error':
-                raise RuntimeError(f'Missing some required files for {camera}{spec} in {path}.')
+            if None in fnames:
+                what = ",".join([ftype for (i,ftype) in enumerate(ftypes) if fnames[i] is None])
+                if missing == 'error':
+                    raise RuntimeError(f'Missing {what} for {camera}{spec} in {path}.')
+                elif missing == 'warn':
+                    logging.warning(f'Missing {what} for {camera}{spec} in {path}.')
+                    continue
             if not openfits:
                 # Return file paths without opening them.
                 yield fnames, camera, spec
@@ -114,14 +120,19 @@ def iterspecs(path, ftypes='cframe', specs=range(10), cameras='brz', expid=None,
                     yield hdus, camera, spec
 
 
-def spec_sky(release, night, expid, specs=range(10), cameras='brz'):
+def get_path(release, night, expid, required=False):
+    path = release / 'exposures' / str(night) / str(expid).zfill(8)
+    if required and not path.exists():
+        raise FileExistsError(path)
+    return path
+
+
+def get_sky(path, specs=range(10), cameras='brz'):
     """Calculate the mean detected sky in each camera in elec/s/Angstrom.
     """
-    specdir = release/ 'exposures' / str(night) / str(expid).zfill(8)
-    assert specdir.exists()
     detected = {c:CoAdd(c) for c in cameras}
     exptime = None
-    for (SKY,), camera, spec in iterspecs(specdir, 'sky'):
+    for (SKY,), camera, spec in iterspecs(path, 'sky'):
         if exptime is None:
             exptime = SKY[0].read_header()['EXPTIME']
         else:
@@ -134,19 +145,17 @@ def spec_sky(release, night, expid, specs=range(10), cameras='brz'):
     return detected
 
 
-def spec_thru(release, night, expid, specs=range(10), cameras='brz'):
+def get_thru(path, specs=range(10), cameras='brz'):
     """Calculate the throughput in each camera for a single exposure.
     See https://github.com/desihub/desispec/blob/master/bin/desi_average_flux_calibration
     and DESI-6043.
     The result includes the instrument throughput as well as the fiber acceptance
     loss and atmospheric extinction.
     """
-    specdir = release / 'exposures' / str(night) / str(expid).zfill(8)
-    assert specdir.exists()
     calibs = {c:CoAdd(c) for c in cameras}
     exptime = None
     primary_area = 8.659e4 # cm2
-    for (FCAL,), camera, spec in iterspecs(specdir, 'fluxcalib'):
+    for (FCAL,), camera, spec in iterspecs(path, 'fluxcalib'):
         if exptime is None:
             exptime = FCAL[0].read_header()['EXPTIME']
         else:
