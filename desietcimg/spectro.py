@@ -1,5 +1,7 @@
 """Utility functions for accessing DESI spectra for ETC calculations.
 """
+import contextlib
+
 import numpy as np
 
 import scipy.ndimage
@@ -7,13 +9,22 @@ import scipy.ndimage
 import fitsio
 
 
+# Define the pipeline reduction output wavelength grid.
 wmin, wmax, wdelta = 3600, 9824, 0.8
 fullwave = np.round(np.arange(wmin, wmax + wdelta, wdelta), 1)
 cslice = {'b': slice(0, 2751), 'r': slice(2700, 5026), 'z': slice(4900, 7781)}
 
+# Calculate the ergs/photon in each wavelength bin.
+#erg_per_photon = (h * c / (fullwave * u.Angstrom)).to(u.erg).value
+erg_per_photon = 1.986445857148928e-08 / fullwave
+
 
 class Spectrum(object):
-    def __init__(self, stype, flux=None, ivar=None, mask=None):
+    """Simple container of flux and ivar for a single camera or the full wavelength range.
+
+    Dividing by a constant or vector updates both the flux and ivar.
+    """
+    def __init__(self, stype, flux=None, ivar=None):
         assert stype == 'full' or stype in cslice, 'invalid stype'
         self.stype = stype
         self.wave = fullwave[cslice[stype]] if stype in cslice else fullwave
@@ -26,13 +37,8 @@ class Spectrum(object):
             assert self.ivar.shape == self._flux.shape, 'flux and ivar have different shapes.'
         else:
             raise ValueError('flux and ivar must both be specified.')
-        if mask is None:
-            self.mask = np.zeros_like(self._flux, bool)
-        else:
-            self.mask = np.asarray(mask)
-            assert self.mask.shape == self._flux.shape, 'flux and mask have different shapes.'
     def copy(self):
-        return Spectrum(self.stype, self.flux.copy(), self.ivar.copy(), self.mask.copy())
+        return Spectrum(self.stype, self.flux.copy(), self.ivar.copy())
     def __itruediv__(self, factor):
         np.divide(self.flux, factor, out=self._flux, where=factor != 0)
         self.ivar *= factor ** 2
@@ -47,6 +53,8 @@ class Spectrum(object):
 
 
 class CoAdd(Spectrum):
+    """Implements += to perform ivar-weighted coaddition.
+    """
     def __init__(self, stype):
         super(CoAdd, self).__init__(stype)
         self._weighted_flux_sum = np.zeros(len(self.wave))
@@ -68,3 +76,85 @@ class CoAdd(Spectrum):
             np.divide(self._weighted_flux_sum, self.ivar, out=self._flux, where=self.ivar > 0)
             self._finalized = True
         return self._flux
+
+
+def iterspecs(path, ftypes='cframe', specs=range(10), cameras='brz', expid=None,
+              openfits=True, camera_first=True, missing='error'):
+    """Iterate over all FITS files with names <ftype>-<camera><spec>-<expid>.fits*
+    Yields (hdus, camera, spec) for each file, or (fname, camera, spec) if openfits is False.
+    Iterates over camera then spec if camera_first is True, otherwise spec then camera.
+    If ftypes is a comma-separated list, open all files within a single context-manager stack.
+    If expid is None, use the enclosing directory name.
+    """
+    ftypes = ftypes.split(',')
+    if expid is None:
+        expid = path.name
+    elif type(expid) is int:
+        expid = expid = str(expid).zfill(8)
+    if camera_first:
+        outers, inners = cameras, specs
+        info = lambda a,b: (a,b)
+    else:
+        outers, inners = specs, cameras
+        info = lambda a,b: (b,a)
+    for outer in outers:
+        for inner in inners:
+            camera, spec = info(outer, inner)
+            # Build the list of file paths for this (camera,spec).
+            fnames = [next(iter(path.glob(f'{ftype}-{camera}{spec}-{expid}.fits*')), None) for ftype in ftypes]
+            if None in fnames and missing == 'error':
+                raise RuntimeError(f'Missing some required files for {camera}{spec} in {path}.')
+            if not openfits:
+                # Return file paths without opening them.
+                yield fnames, camera, spec
+            else:
+                # Use context managers to open each file.
+                with contextlib.ExitStack() as stack:
+                    hdus = [stack.enter_context(fitsio.FITS(str(fname))) for fname in fnames]
+                    yield hdus, camera, spec
+
+
+def spec_sky(release, night, expid, specs=range(10), cameras='brz'):
+    """Calculate the mean detected sky in each camera in elec/s/Angstrom.
+    """
+    specdir = release/ 'exposures' / str(night) / str(expid).zfill(8)
+    assert specdir.exists()
+    detected = {c:CoAdd(c) for c in cameras}
+    exptime = None
+    for (SKY,), camera, spec in iterspecs(specdir, 'sky'):
+        if exptime is None:
+            exptime = SKY[0].read_header()['EXPTIME']
+        else:
+            assert SKY[0].read_header()['EXPTIME'] == exptime
+        flux, ivar = SKY['SKY'].read(), SKY['IVAR'].read()
+        detected[camera] += Spectrum(camera, np.median(flux, axis=0), np.median(ivar, axis=0))
+    # Convert from elec/Ang to elec/Ang/sec
+    for camera in cameras:
+        detected[camera] /= exptime
+    return detected
+
+
+def spec_thru(release, night, expid, specs=range(10), cameras='brz'):
+    """Calculate the throughput in each camera for a single exposure.
+    See https://github.com/desihub/desispec/blob/master/bin/desi_average_flux_calibration
+    and DESI-6043.
+    The result includes the instrument throughput as well as the fiber acceptance
+    loss and atmospheric extinction.
+    """
+    specdir = release / 'exposures' / str(night) / str(expid).zfill(8)
+    assert specdir.exists()
+    calibs = {c:CoAdd(c) for c in cameras}
+    exptime = None
+    primary_area = 8.659e4 # cm2
+    for (FCAL,), camera, spec in iterspecs(specdir, 'fluxcalib'):
+        if exptime is None:
+            exptime = FCAL[0].read_header()['EXPTIME']
+        else:
+            assert FCAL[0].read_header()['EXPTIME'] == exptime
+        fluxcalib, ivar = FCAL['FLUXCALIB'].read(), FCAL['IVAR'].read()
+        calibs[camera] += Spectrum(camera, np.median(fluxcalib, axis=0), np.median(ivar, axis=0))
+    # Convert from (1e17 elec cm2 s / erg) to (elec/phot)
+    return {
+        c: 1e17 * calibs[c].flux * erg_per_photon[cslice[c]] / (primary_area * exptime)
+        for c in cameras
+    }
