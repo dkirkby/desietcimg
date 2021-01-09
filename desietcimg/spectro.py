@@ -176,8 +176,7 @@ def get_thru(path, specs=range(10), cameras='brz'):
             assert FCAL[0].read_header()['EXPTIME'] == exptime
         fluxcalib, ivar = FCAL['FLUXCALIB'].read(), FCAL['IVAR'].read()
         calibs[camera] += Spectrum(camera, np.median(fluxcalib, axis=0), np.median(ivar, axis=0))
-    # Convert from (1e17 elec cm2 s / erg) to (elec/phot)
-    return {
-        c: 1e17 * calibs[c].flux * erg_per_photon[cslice[c]] / (M1_area * exptime)
-        for c in cameras
-    }
+    for camera in cameras:
+        # Convert from (1e17 elec cm2 s / erg) to (elec/phot)
+        calibs[camera] /= (M1_area * exptime) / (1e17 * erg_per_photon[cslice[camera]])
+    return calibs

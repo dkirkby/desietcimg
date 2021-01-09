@@ -116,13 +116,13 @@ def etcdepth(args):
             thru = desietcimg.spectro.get_thru(path, specs=specs, cameras=args.cameras)
             sky = desietcimg.spectro.get_sky(path, specs=specs, cameras=args.cameras)
             for c in args.cameras:
-                throughputs[c].append(thru[c])
+                throughputs[c].append([thru[c].flux, thru[c].ivar])
                 sky_spectra[c].append([sky[c].flux, sky[c].ivar])
             # Should use actual MJD_OBS,EXPTIME instead of db request values
             mjd_spectro = row['mjd_obs']
             exptime_spectro = row['exptime']
             mjd_grid = mjd_spectro + (0.5 + np.arange(args.ngrid)) / args.ngrid * exptime_spectro / 86400
-            exp_meta = (int(night), expid, mjd_spectro, exptime_spectro)
+            exp_meta = (int(night), expid, tile, mjd_spectro, exptime_spectro)
             # Process any available ETC results for this exposure.
             etcdir = ETC / night / exptag
             if not etcdir.exists():
@@ -154,17 +154,22 @@ def etcdepth(args):
                     thru_grid.append(np.zeros_like(mjd_grid))
                     logging.warning(f'Missing ETC guide data for {night}/{exptag}')
             all_meta.append(exp_meta)
+
+            testout = np.vstack(sky_grid).astype(np.float32)
+            assert np.all(np.isfinite(testout)), f'Bad output for {tille},{night},{exptag}'
+
     # Save the results.
     if args.save:
         fits = fitsio.FITS(args.save, 'rw', clobber=True)
         fits.write(
-            np.array(all_meta, dtype=[('night','i4'),('expid','i4'),('mjd','f8'),('exptime','f4')]),
+            np.array(all_meta, dtype=[
+                ('NIGHT','i4'),('EXPID','i4'),('TILEID','i4'),('MJD-OBS','f8'),('EXPTIME','f4')]),
             extname='ETC')
         for camera in args.cameras:
             fits.write(np.array(throughputs[camera], np.float32), extname=camera.upper()+'THRU')
             fits.write(np.array(sky_spectra[camera], np.float32), extname=camera.upper()+'SKY')
-        fits.write(np.vstack(sky_grid).astype(np.float32), extname='ETCSKY')
         fits.write(np.vstack(thru_grid).astype(np.float32), extname='ETCTHRU')
+        fits.write(np.vstack(sky_grid).astype(np.float32), extname='ETCSKY')
         fits.close()
         logging.info(f'Saved results to {args.save}.')
 
