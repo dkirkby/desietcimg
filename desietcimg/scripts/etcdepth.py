@@ -49,11 +49,13 @@ def load_etc_gfa(names, exptime):
         data = np.loadtxt(name, delimiter=',', dtype=
             {'names':('mjd','dx','dy','transp','ffrac','nll'),
              'formats': ('f8','f4','f4','f4','f4','f4')})
-        # Calculate the median over GFA cameras in each frame.
-        mjd.append(np.mean(data['mjd'], axis=0) + 0.5 * exptime / 86400)
-        transp.append(np.nanmedian(data['transp'], axis=0))
-        ffrac.append(np.nanmedian(data['ffrac'], axis=0))
-    return np.array(mjd), np.array(transp), np.array(ffrac)
+        mjd.append(data['mjd'] + 0.5 * exptime / 86400)
+        transp.append(data['transp'])
+        ffrac.append(data['ffrac'])
+    mjd = np.vstack(mjd)
+    transp = np.vstack(transp)
+    ffrac = np.vstack(ffrac)
+    return np.mean(mjd, axis=0), np.nanmedian(transp, axis=0), np.nanmedian(ffrac, axis=0)
 
 
 def etcdepth(args):
@@ -89,6 +91,8 @@ def etcdepth(args):
     else:
         raise ValueError(f'Cannot interpret --tiles {args.tiles}')
     # Loop over exposures for each tile.
+    specs = [spec for spec in range(10) if spec not in args.badspec]
+    logging.info(f'Processing cameras {args.cameras} for {"".join([str(spec) for spec in specs])}.')
     nexp = len(expdata)
     tiles = set(expdata['tileid'])
     logging.info(f'Processing {nexp} exposures for tiles: {tiles}')
@@ -109,8 +113,8 @@ def etcdepth(args):
                 logging.warning(f'Missing pipeline results for {night}/{expid}.')
                 continue
             # Get the throughput and detected sky in elec/s/angstrom for this exposure.
-            thru = desietcimg.spectro.get_thru(path)
-            sky = desietcimg.spectro.get_sky(path)
+            thru = desietcimg.spectro.get_thru(path, specs=specs, cameras=args.cameras)
+            sky = desietcimg.spectro.get_sky(path, specs=specs, cameras=args.cameras)
             for c in args.cameras:
                 throughputs[c].append(thru[c])
                 sky_spectra[c].append([sky[c].flux, sky[c].ivar])
@@ -142,7 +146,10 @@ def etcdepth(args):
                 gfas = sorted(etcdir.glob(f'guide_GUIDE?_{exptag}.csv'))
                 if gfas:
                     mjd_gfa, transp_gfa, ffrac_gfa = load_etc_gfa(gfas, exptime_gfa)
-                    thru_grid.append(np.interp(mjd_grid, mjd_gfa, transp_gfa * ffrac_gfa))
+                    thru_gfa = transp_gfa * ffrac_gfa
+                    left = np.mean(thru_gfa[:16])
+                    right = np.mean(thru_gfa[-16:])
+                    thru_grid.append(np.interp(mjd_grid, mjd_gfa, thru_gfa, left=left, right=right))
                 else:
                     thru_grid.append(np.zeros_like(mjd_grid))
                     logging.warning(f'Missing ETC guide data for {night}/{exptag}')
@@ -179,7 +186,7 @@ def main():
         help='pipeline reduction release to use')
     parser.add_argument('--cameras', type=str, default='brz',
         help='spectrograph cameras to use')
-    parser.add_argument('--badspec', type=int, nargs='*',
+    parser.add_argument('--badspec', type=int, nargs='*', default=[],
         help='ignore data from these spectrographs (0-9)')
     parser.add_argument('--desiroot', type=str, default=None,
         help='root path for locating DESI data, defaults to $DESI_ROOT')

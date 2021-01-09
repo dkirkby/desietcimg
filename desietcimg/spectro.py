@@ -14,10 +14,24 @@ import fitsio
 wmin, wmax, wdelta = 3600, 9824, 0.8
 fullwave = np.round(np.arange(wmin, wmax + wdelta, wdelta), 1)
 cslice = {'b': slice(0, 2751), 'r': slice(2700, 5026), 'z': slice(4900, 7781)}
+cwave = {c: fullwave[cs] for (c, cs) in cslice.items()}
 
 # Calculate the ergs/photon in each wavelength bin.
 #erg_per_photon = (h * c / (fullwave * u.Angstrom)).to(u.erg).value
 erg_per_photon = 1.986445857148928e-08 / fullwave
+
+# Define the primary mirror area assumed for etendue calculations.
+# https://desi.lbl.gov/svn/code/desimodel/trunk/data/desi.yaml
+# geomarea = PI*(M1_diameter/2)^2 - PI*(obscuration_diameter/2)^2 - 4*trussarea
+# trussarea = 0.5*(M1_diameter-obscuration_diameter) * M2_support_width
+# M1_diameter: 3.797          # meters
+# obscuration_diameter: 1.8   # meters
+# M2_support_width: 0.03      # meters
+M1_area = 8.658739421e4 # in cm2
+
+# Define the field-averaged fiber sky area assumed for etendue calculations.
+# Based on ECHO22 platescales.
+fiber_solid_angle = 1.9524634 # in sq.arcsec.
 
 
 class Spectrum(object):
@@ -164,6 +178,6 @@ def get_thru(path, specs=range(10), cameras='brz'):
         calibs[camera] += Spectrum(camera, np.median(fluxcalib, axis=0), np.median(ivar, axis=0))
     # Convert from (1e17 elec cm2 s / erg) to (elec/phot)
     return {
-        c: 1e17 * calibs[c].flux * erg_per_photon[cslice[c]] / (primary_area * exptime)
+        c: 1e17 * calibs[c].flux * erg_per_photon[cslice[c]] / (M1_area * exptime)
         for c in cameras
     }
