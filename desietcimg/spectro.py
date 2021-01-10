@@ -150,7 +150,8 @@ def get_sky(path, specs=range(10), cameras='brz'):
         if exptime is None:
             exptime = SKY[0].read_header()['EXPTIME']
         else:
-            assert SKY[0].read_header()['EXPTIME'] == exptime
+            if SKY[0].read_header()['EXPTIME'] != exptime:
+                raise RuntimeError(f'EXPTIME mismatch for sky in {path}')
         flux, ivar = SKY['SKY'].read(), SKY['IVAR'].read()
         detected[camera] += Spectrum(camera, np.median(flux, axis=0), np.median(ivar, axis=0))
     # Convert from elec/Ang to elec/Ang/sec
@@ -171,12 +172,34 @@ def get_thru(path, specs=range(10), cameras='brz'):
     primary_area = 8.659e4 # cm2
     for (FCAL,), camera, spec in iterspecs(path, 'fluxcalib'):
         if exptime is None:
-            exptime = FCAL[0].read_header()['EXPTIME']
+            hdr = FCAL[0].read_header()
+            exptime = hdr['EXPTIME']
         else:
-            assert FCAL[0].read_header()['EXPTIME'] == exptime
+            if FCAL[0].read_header()['EXPTIME'] != exptime:
+                raise RuntimeError(f'EXPTIME mismatch for fluxcalib in {path}')
         fluxcalib, ivar = FCAL['FLUXCALIB'].read(), FCAL['IVAR'].read()
         calibs[camera] += Spectrum(camera, np.median(fluxcalib, axis=0), np.median(ivar, axis=0))
     for camera in cameras:
         # Convert from (1e17 elec cm2 s / erg) to (elec/phot)
         calibs[camera] /= (M1_area * exptime) / (1e17 * erg_per_photon[cslice[camera]])
     return calibs
+
+
+def get_ebv(path, specs=range(10)):
+    """Lookup the EBV value for all targets from the CFRAME fibermap.
+    Return the median of all non-zero values.
+    """
+    ebvs = []
+    for (CFRAME,), camera, spec in iterspecs(path, 'cframe', specs=specs, cameras='b'):
+        ebvs.append(CFRAME['FIBERMAP'].read(columns=['EBV'])['EBV'].astype(np.float32))
+    ebvs = np.stack(ebvs).reshape(-1)
+    nonzero = ebvs > 0
+    ebvs = ebvs[nonzero]
+    return np.nanmedian(ebvs)
+
+
+def get_hdr(path):
+    """Return the FLUX HDU header from any CFRAME file at this path.
+    """
+    for (CFRAME,), camera, spec in iterspecs(path, 'cframe'):
+        return CFRAME['FLUX'].read_header()

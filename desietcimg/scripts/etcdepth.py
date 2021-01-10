@@ -44,6 +44,7 @@ def load_etc_sky(name, exptime):
 
 
 def load_etc_gfa(names, exptime):
+    assert np.isfinite(exptime)
     mjd, transp, ffrac = [], [], []
     for name in names:
         data = np.loadtxt(name, delimiter=',', dtype=
@@ -52,10 +53,22 @@ def load_etc_gfa(names, exptime):
         mjd.append(data['mjd'] + 0.5 * exptime / 86400)
         transp.append(data['transp'])
         ffrac.append(data['ffrac'])
+        if not np.all(np.isfinite(data['mjd']) & np.isfinite(data['transp']) & np.isfinite(data['ffrac'])):
+            logging.warning(f'Ignoring some NaN values in {name}')
     mjd = np.vstack(mjd)
     transp = np.vstack(transp)
     ffrac = np.vstack(ffrac)
-    return np.mean(mjd, axis=0), np.nanmedian(transp, axis=0), np.nanmedian(ffrac, axis=0)
+    return np.nanmean(mjd, axis=0), np.nanmedian(transp, axis=0), np.nanmedian(ffrac, axis=0)
+
+
+def check_exptime(value, label='exptime', default=None):
+    """Check for None, <=0 or nan/inf and use a default if specified.
+    Logs a warning message when a bad value is found.
+    """
+    if value is None or value <= 0 or not np.isfinite(value):
+        logging.warning(f'Found invalid {label}={value}, using default={default}.')
+        value = default
+    return value
 
 
 def etcdepth(args):
@@ -103,68 +116,87 @@ def etcdepth(args):
     npix = {C: len(desietcimg.spectro.fullwave[desietcimg.spectro.cslice[C]]) for C in args.cameras}
     for tile in tiles:
         sel = expdata['tileid'] == tile
+        ebv = None
         logging.info(f'tile {tile} exposures {list(expdata["id"][sel])}')
         for _, row in expdata[sel].iterrows():
             night = str(int(row['night']))
             expid = int(row['id'])
             exptag = str(expid).zfill(8)
-            path = desietcimg.spectro.get_path(RELEASE, night, expid)
-            if not path.exists():
-                logging.warning(f'Missing pipeline results for {night}/{expid}.')
-                continue
-            # Get the throughput and detected sky in elec/s/angstrom for this exposure.
-            thru = desietcimg.spectro.get_thru(path, specs=specs, cameras=args.cameras)
-            sky = desietcimg.spectro.get_sky(path, specs=specs, cameras=args.cameras)
-            for c in args.cameras:
-                throughputs[c].append([thru[c].flux, thru[c].ivar])
-                sky_spectra[c].append([sky[c].flux, sky[c].ivar])
-            # Should use actual MJD_OBS,EXPTIME instead of db request values
-            mjd_spectro = row['mjd_obs']
-            exptime_spectro = row['exptime']
-            mjd_grid = mjd_spectro + (0.5 + np.arange(args.ngrid)) / args.ngrid * exptime_spectro / 86400
-            exp_meta = (int(night), expid, tile, mjd_spectro, exptime_spectro)
-            # Process any available ETC results for this exposure.
-            etcdir = ETC / night / exptag
-            if not etcdir.exists():
-                logging.error(f'Missing ETC exposure data for {night}/{exptag}')
-            else:
-                # Process ETC data for this exposure.
-                exptime_sky = row['skytime']
-                exptime_gfa = row['guidtime']
-                if exptime_gfa is None:
-                    #logging.warning(f'Forcing GUIDTIME=5 for {night}/{exptag}')
-                    exptime_gfa = 5
-                sky = etcdir / f'sky_{exptag}.csv'
-                if sky.exists():
-                    mjd_sky, flux_sky = load_etc_sky(sky, exptime_sky)
-                    # Interpolate sky level to MJD grid.
-                    flux_sky_grid = np.interp(mjd_grid, mjd_sky, flux_sky)
-                    sky_grid.append(flux_sky_grid)
+            try:
+                path = desietcimg.spectro.get_path(RELEASE, night, expid)
+                if not path.exists():
+                    logging.error(f'Missing pipeline results for {night}/{expid}.')
+                    continue
+                if check_exptime(row['exptime']) is None:
+                    logging.error(f'Skipping {night}/{exptag} with invalid database EXPTIME.')
+                    continue
+                if ebv is None:
+                    # Calculate the median E(B-V) for the targets on this tile.
+                    ebv = desietcimg.spectro.get_ebv(path, specs=specs)
+                # Get the exposure header and check for required keys.
+                hdr = desietcimg.spectro.get_hdr(path)
+                badhdr = False
+                missing = [key for key in ('MJD-OBS','EXPTIME','GUIDTIME','SKYTIME','SKYDEC','SKYRA','AIRMASS')
+                        if key not in hdr]
+                if any(missing):
+                    logging.error(f'Missing keywords for {night}/{exptag}: {",".join(missing)}.')
+                    continue
+                # Get the throughput and detected sky in elec/s/angstrom for this exposure.
+                thru = desietcimg.spectro.get_thru(path, specs=specs, cameras=args.cameras)
+                sky = desietcimg.spectro.get_sky(path, specs=specs, cameras=args.cameras)
+                for c in args.cameras:
+                    throughputs[c].append([thru[c].flux, thru[c].ivar])
+                    sky_spectra[c].append([sky[c].flux, sky[c].ivar])
+                # Should use actual MJD_OBS,EXPTIME instead of db request values
+                mjd_spectro = hdr['MJD-OBS']
+                exptime_spectro = check_exptime(hdr['EXPTIME'], 'EXPTIME', row['exptime'])
+                RA, DEC, X = hdr['SKYRA'], hdr['SKYDEC'], hdr['AIRMASS']
+                mjd_grid = mjd_spectro + (0.5 + np.arange(args.ngrid)) / args.ngrid * exptime_spectro / 86400
+                exp_dtype = [
+                    ('NIGHT','i4'),('EXPID','i4'),('TILEID','i4'),
+                    ('SKYRA','f4'),('SKYDEC','f4'),('AIRMASS','f4'),
+                    ('MJD-OBS','f8'),('EXPTIME','f4'),('EBV','f4')]
+                exp_meta = (int(night), expid, tile, RA, DEC, X, mjd_spectro, exptime_spectro, ebv)
+                # Process any available ETC results for this exposure.
+                etcdir = ETC / night / exptag
+                if not etcdir.exists():
+                    logging.error(f'Missing ETC exposure data for {night}/{exptag}')
                 else:
-                    sky_grid.append(np.zeros_like(mjd_grid))
-                    logging.warning(f'Missing ETC sky data for {night}/{exptag}')
-                gfas = sorted(etcdir.glob(f'guide_GUIDE?_{exptag}.csv'))
-                if gfas:
-                    mjd_gfa, transp_gfa, ffrac_gfa = load_etc_gfa(gfas, exptime_gfa)
-                    thru_gfa = transp_gfa * ffrac_gfa
-                    left = np.mean(thru_gfa[:16])
-                    right = np.mean(thru_gfa[-16:])
-                    thru_grid.append(np.interp(mjd_grid, mjd_gfa, thru_gfa, left=left, right=right))
-                else:
-                    thru_grid.append(np.zeros_like(mjd_grid))
-                    logging.warning(f'Missing ETC guide data for {night}/{exptag}')
-            all_meta.append(exp_meta)
+                    # Process ETC SKY results for this exposure.
+                    exptime_sky = check_exptime(hdr['SKYTIME'], 'SKYTIME', 60.)
+                    sky = etcdir / f'sky_{exptag}.csv'
+                    if sky.exists():
+                        mjd_sky, flux_sky = load_etc_sky(sky, exptime_sky)
+                        # Interpolate sky level to MJD grid.
+                        flux_sky_grid = np.interp(mjd_grid, mjd_sky, flux_sky)
+                        sky_grid.append(flux_sky_grid)
+                    else:
+                        sky_grid.append(np.zeros_like(mjd_grid))
+                        logging.warning(f'Missing ETC sky data for {night}/{exptag}')
+                    # Process ETC GFA results for this exposure.
+                    exptime_gfa = check_exptime(hdr['GUIDTIME'], 'GUIDTIME', 5.)
+                    gfas = sorted(etcdir.glob(f'guide_GUIDE?_{exptag}.csv'))
+                    if gfas:
+                        mjd_gfa, transp_gfa, ffrac_gfa = load_etc_gfa(gfas, exptime_gfa)
+                        thru_gfa = transp_gfa * ffrac_gfa
+                        left = np.mean(thru_gfa[:16])
+                        right = np.mean(thru_gfa[-16:])
+                        thru_grid.append(np.interp(mjd_grid, mjd_gfa, thru_gfa, left=left, right=right))
+                    else:
+                        thru_grid.append(np.zeros_like(mjd_grid))
+                        logging.warning(f'Missing ETC guide data for {night}/{exptag}')
+                all_meta.append(exp_meta)
 
-            testout = np.vstack(sky_grid).astype(np.float32)
-            assert np.all(np.isfinite(testout)), f'Bad output for {tille},{night},{exptag}'
+                testout = np.vstack(thru_grid).astype(np.float32)
+                assert np.all(np.isfinite(testout)), f'Bad output for {tile},{night},{exptag}'
+
+            except Exception as e:
+                logging.error(f'Giving up on {night}/{exptag}: {e}')
 
     # Save the results.
     if args.save:
         fits = fitsio.FITS(args.save, 'rw', clobber=True)
-        fits.write(
-            np.array(all_meta, dtype=[
-                ('NIGHT','i4'),('EXPID','i4'),('TILEID','i4'),('MJD-OBS','f8'),('EXPTIME','f4')]),
-            extname='ETC')
+        fits.write(np.array(all_meta, dtype=exp_dtype), extname='ETC')
         for camera in args.cameras:
             fits.write(np.array(throughputs[camera], np.float32), extname=camera.upper()+'THRU')
             fits.write(np.array(sky_spectra[camera], np.float32), extname=camera.upper()+'SKY')

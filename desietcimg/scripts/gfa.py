@@ -185,11 +185,14 @@ def process_one(inpath, night, expid, guiding, camera, mjdobs, exptime, ccdtemp,
                 stars_result = process_guide_sequence(stars, exptime, maxdither=maxdither, ndither=ndither)
                 if stars_result is not None and framepath is not None:
                     Dsum, WDsum, Msum, fit_params, gmm_params = stars_result
-                    fig, ax = plot_guide_stars(Dsum, WDsum, Msum, fit_params, night, expid, camera)
-                    fname = framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format)
-                    plt.savefig(fname, pil_kwargs=dict(quality=80))
-                    plt.close(fig)
-                    logging.info('Wrote {0}'.format(fname))
+                    try:
+                        fig, ax = plot_guide_stars(Dsum, WDsum, Msum, fit_params, night, expid, camera)
+                        fname = framepath / 'guide_{0}_{1}.{2}'.format(camera, expid, img_format)
+                        plt.savefig(fname, pil_kwargs=dict(quality=80))
+                        plt.close(fig)
+                        logging.info('Wrote {0}'.format(fname))
+                    except Exception as e:
+                        logging.error(f'Error plotting guide results: {e}.')
                     # Write a CSV file of per-frame median results for this GFA.
                     med_params = np.nanmedian(fit_params, axis=0)
                     nexp, npar = med_params.shape
