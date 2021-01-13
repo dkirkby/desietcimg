@@ -336,6 +336,7 @@ def process(inpath, args, pool=None, pool_timeout=300):
     if hdr['EXPTIME'] == 0:
         logging.info('Skipping zero EXPTIME: {0}/{1}'.format(night, expid))
         return
+    stars_expected = {}
     if guiding and args.guide_stars:
         assert GMM is not None, 'GMM not initialized.'
         PlateMaker, GuiderExpected = None, None
@@ -349,22 +350,19 @@ def process(inpath, args, pool=None, pool_timeout=300):
             logging.warning('PMGSTARS extension not found.')
         if PlateMaker is not None:
             # Use PlateMaker (row, col) for expected positions of each guide star.
-            stars_expected = {}
             for camera in np.unique(PlateMaker['GFA_LOC']):
                 stars = PlateMaker[PlateMaker['GFA_LOC'] == camera]
                 stars_expected[camera] = np.array((stars['COL'], stars['ROW'], stars['MAG'])).T
         elif GuiderExpected is not None:
             # Fall back to guider centroids.  I assume the JSON files uses the same coordinate
             # convention as PlateMaker since it copies the PlateMaker values when both are present.
-            stars_expected = {}
             for camera in GuiderExpected:
                 nstars = len(GuiderExpected[camera])
                 if nstars > 0:
                     stars_expected[camera] = np.array(
                         (GuiderExpected[camera][:, 0], GuiderExpected[camera][:, 1], np.zeros(nstars))).T
         else:
-            logging.warning('Disabling --guide-stars option.')
-            args.guide_stars = False
+            logging.warning(f'No guide stars available for {night}/{expid}.')
     # Prepare the output path.
     outpath = args.outpath / night / expid
     outpath.mkdir(parents=True, exist_ok=True)
@@ -389,13 +387,13 @@ def process(inpath, args, pool=None, pool_timeout=300):
             # Guiding exposures do not record FOCUS data.
             continue
         # Fetch this camera's CCD temperatures and exposure times.
-        stars = None
         if guiding:
             info = fitsio.read(str(inpath), ext=camera + 'T', columns=('MJD-OBS', 'EXPTIME', 'GCCDTEMP'))
-            if args.guide_stars:
-                stars = stars_expected.get(camera)
+            # stars might be None if --guide-stars arg not present or no guide stars available.
+            stars = stars_expected.get(camera, None)
         else:
             info = fitsio.read_header(str(inpath), ext=camera)
+            stars = None
         mjdobs = info['MJD-OBS']
         exptime = info['EXPTIME']
         ccdtemp = info['GCCDTEMP']
